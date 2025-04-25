@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Manga Search</title>
+</head>
+<body>
+    <h2>Search Manga</h2>
+    <form method="get" action="/search">
+        <div style="margin-bottom: 1em;">
+            <input type="checkbox" id="only_available" name="only_available" value="1">
+            <label for="only_available">Only Show Available</label>
+        </div>
+        <input type="text" name="title" placeholder="Title">
+        <input type="text" name="volume" placeholder="Volume">
+        <select name="type">
+            <option value="">All Types</option>
+            <option value="Manga">Manga</option>
+            <option value="One-shot">One-shot</option>
+            <option value="Doujinshi">Doujinshi</option>
+            <option value="Light-Novel">Light Novel</option>
+            <option value="Novel">Novel</option>
+            <option value="Manhwa">Manhwa</option>
+            <option value="Manhua">Manhua</option>
+        </select>
+        <select name="branch">
+            <option value="">All Branches</option>
+            <option value="Leroy Collins Leon County Main Public Library">MAIN</option>
+            <option value="Bruce J. Host Northeast Branch Library">NORTHEAST</option>
+            <option value="Lake Jackson Branch Library">LAKEJAX</option>
+            <option value="Eastside Branch Library">EASTSIDE</option>
+            <option value="Dr BL Perry Jr Branch Library">BLPERRY</option>
+            <option value="Woodville Branch Library">WOODVILLE</option>
+            <option value="Jane G. Sauls Ft. Braden Branch Library">FTBRADEN</option>
+        </select>
+        <select name="status">
+            <option value="">All Statuses</option>
+            <option value="Graphic Novel">Graphic Novel</option>
+            <option value="Checked Out">Checked Out</option>
+            <option value="On hold for someone">On Hold</option>
+            <option value="Youth Fiction">Youth Fiction</option>
+            <option value="Adult Non-Fiction">Adult Non-Fiction</option>
+            <option value="Being transferred between libraries">Being transferred between libraries</option>
+            <option value="Being returned to standard shelving location">Being returned to standard shelving location</option>
+            <option value="Being acquired by the library">Being acquired by the library</option>
+            <option value="Unkown">Unkown</option>
+        </select>
+        <button type="submit">Search</button>
+    </form>
+    <div style="display: flex; gap: 0.5em; margin-top: 1em;">
+        <b>Drop Tables and Insert Data:</b>
+        <form action="/reset" method="post">
+            <button type="submit">Reset Data</button>
+        </form>
+    </div>
+    <b>Branches With More Than 10 Volumes of Manga:</b>
+    <table border="1">
+        <tr>
+            <th>Branch Name</th>
+            <th>Manga Count</th>
+        </tr>
+        {% for row in manga_per_library %}
+        <tr>
+            <td>{{ row.BranchName }}</td>
+            <td>{{ row.VolumeCount }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    <form method="POST">
+        <input type="hidden" name="action" value="update">
+        <b>Update Volumes:</b>
+        <input type="text" name="title" placeholder="Title" required>
+        <input type="number" name="volume" placeholder="Volumes" required>
+        <button type="submit">Submit</button>
+    </form>
+    <form method="POST">
+        <input type="hidden" name="action" value="delete">
+        <b>Delete Volume:</b>
+        <input type="text" name="title" placeholder="Title" required>
+        <input type="number" name="volume" placeholder="Volume" required>
+        <button type="submit">Submit</button>
+    </form>
+    <form method="POST">
+        <input type="hidden" name="action" value="get_authors">
+        <b>Get Authors:</b>
+        <input type="number" name="authors" placeholder="Number of Authors" required>
+        <button type="submit">Submit</button>
+    </form>
+    <form method="POST">
+        <input type="hidden" name="action" value="scrape">
+        <b>Scrape Library:</b>
+        <input type="number" name="books" placeholder="Number of Books" required>
+        <button type="submit">Submit</button>
+    </form>
+</body>
+</html>
