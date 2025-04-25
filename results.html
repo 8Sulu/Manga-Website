@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Search Results</title>
+    <style>
+        th {
+            cursor: pointer;
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <h2>{{ count }} Results</h2>
+
+    {% if status_summary %}
+    <div style="margin-bottom: 1em;">
+        {% for status, count in status_summary.items() %}
+            <span style="margin-right: 1em;">{{ status }}: {{ count }}</span>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <a href="/">← Back to Search</a>    
+
+    {% if results %}
+        <table border="1" id="resultsTable">
+            <thead>
+                <tr>
+                    <th onclick="sortTable(0)">Title</th>
+                    <th onclick="sortTable(1)">Volume</th>
+                    <th onclick="sortTable(3)">Volumes</th>
+                    <th onclick="sortTable(2)">Type</th>
+                    <th onclick="sortTable(4)">Members</th>
+                    <th onclick="sortTable(5)">Score</th>
+                    <th onclick="sortTable(6)">Branch</th>
+                    <th onclick="sortTable(7)">Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in results %}
+                <tr>
+                    <td>{{ row.Title }}</td>
+                    <td>{{ row.Volume or 'N/A' }}</td>
+                    <td>{{ row.Volumes }}</td>
+                    <td>{{ row.Type }}</td>
+                    <td>{{ row.Members }}</td>
+                    <td>{{ row.Score }}</td>
+                    <td>{{ row.BranchName or 'N/A' }}</td>
+                    <td>{{ row.Status or 'N/A' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>No results found.</p>
+    {% endif %}
+
+    <script>
+        let sortDirections = {};
+    
+        function sortTable(columnIndex) {
+            const table = document.getElementById("resultsTable");
+            const rows = Array.from(table.tBodies[0].rows); 
+    
+            sortDirections[columnIndex] = !sortDirections[columnIndex];
+            const direction = sortDirections[columnIndex] ? 1 : -1;
+    
+            rows.sort((a, b) => {
+                let valA = a.cells[columnIndex].innerText.trim();
+                let valB = b.cells[columnIndex].innerText.trim();
+    
+                const numA = parseFloat(valA);
+                const numB = parseFloat(valB);
+                const isNumeric = !isNaN(numA) && !isNaN(numB);
+    
+                if (isNumeric) {
+                    return (numA - numB) * direction;
+                } else {
+                    valA = valA.toLowerCase();
+                    valB = valB.toLowerCase();
+                    if (valA > valB) return direction;
+                    if (valA < valB) return -direction;
+                    return 0;
+                }
+            });
+    
+            const tbody = table.querySelector("tbody");
+            tbody.innerHTML = "";
+            rows.forEach(row => tbody.appendChild(row));
+        }
+    </script>
+</body>
+</html>
