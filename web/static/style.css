@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Search Results</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<style>
+/* Fallback table styles in case external CSS fails to load */
+body { font-family: system-ui, sans-serif; padding: 1.5rem; max-width: 1200px; margin: 0 auto; background: #0f0f11; color: #e8e8f0; }
+.results-top { display: flex; align-items: baseline; gap: 1.5rem; margin-bottom: .75rem; }
+.results-top a { color: #a99ff8; font-size: .9rem; }
+.summary-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 1rem; font-size: .8rem; }
+.badge { padding: 3px 10px; border-radius: 99px; border: 1px solid #333; background: #1e1e24; color: #888; }
+.badge.avail { background: rgba(62,207,142,.12); border-color: rgba(62,207,142,.3); color: #3ecf8e; }
+.badge.out   { background: rgba(248,113,113,.12); border-color: rgba(248,113,113,.3); color: #f87171; }
+.badge.hold  { background: rgba(251,191,36,.12);  border-color: rgba(251,191,36,.3);  color: #fbbf24; }
+table { width: 100%; border-collapse: collapse; font-size: .84rem; background: #1e1e24; border: 1px solid #2a2a35; border-radius: 8px; overflow: hidden; margin-top: .5rem; }
+th { text-align: left; padding: 8px 10px; background: #16161a; color: #ffffff; font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; border-bottom: 1px solid #2a2a35; cursor: pointer; user-select: none; white-space: nowrap; }
+th:hover { color: #aaa; }
+th.asc::after  { content: ' ↑'; color: #7c6af7; }
+th.desc::after { content: ' ↓'; color: #7c6af7; }
+td { padding: 7px 10px; border-bottom: 1px solid #1e1e24; vertical-align: middle; color: #e0e0e0; }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: #1e1e24; }
+.title-strong { font-weight: 500; }
+.muted { color: #666; }
+.score { color: #a99ff8; font-family: monospace; }
+.st-avail { color: #3ecf8e; }
+.st-out   { color: #f87171; font-weight: 500; }
+.st-hold  { color: #fbbf24; }
+.avail-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { font-size: .72rem; padding: 2px 8px; border-radius: 99px; border: 1px solid #2a2a35; background: #1e1e24; color: #888; white-space: nowrap; font-family: monospace; }
+.chip.avail { background: rgba(62,207,142,.1);  border-color: rgba(62,207,142,.25); color: #3ecf8e; }
+.chip.out   { background: rgba(248,113,113,.1); border-color: rgba(248,113,113,.25); color: #f87171; }
+.chip.hold  { background: rgba(251,191,36,.1);  border-color: rgba(251,191,36,.25);  color: #fbbf24; }
+p.empty { color: #555; }
+</style>
+</head>
+<body>
+
+<div class="results-top">
+<h1 style="font-size:1.1rem;font-weight:500">{{ count }} result{{ 's' if count != 1 }}</h1>
+<a href="/">← Back</a>
+</div>
+
+{% if status_summary %}
+<div class="summary-row">
+{% for s, c in status_summary.items() | sort %}
+{% if 'Checked Out' in s %}
+<span class="badge out">Checked out: {{ c }}</span>
+{% elif 'Graphic Novel' in s or 'Youth Fiction' in s or 'Adult Non-Fiction' in s %}
+<span class="badge avail">{{ s }}: {{ c }}</span>
+{% elif 'hold' in s.lower() %}
+<span class="badge hold">On hold: {{ c }}</span>
+{% else %}
+<span class="badge">{{ s }}: {{ c }}</span>
+{% endif %}
+{% endfor %}
+</div>
+{% endif %}
+
+{% if results %}
+<table id="t">
+<thead>
+<tr>
+<th onclick="sort(0)">Title</th>
+<th onclick="sort(1)">Vol</th>
+<th onclick="sort(2)">Total vols</th>
+<th onclick="sort(3)">Type</th>
+<th onclick="sort(4)">Members</th>
+<th onclick="sort(5)">Score</th>
+<th>Branches</th>
+</tr>
+</thead>
+<tbody>
+{% for r in results %}
+<tr>
+<td><span class="title-strong">{{ r.Title }}</span></td>
+<td style="font-family:monospace">{{ r.Volume or '—' }}</td>
+<td class="muted" style="font-family:monospace">{{ r.Volumes or '?' }}</td>
+<td class="muted">{{ r.Type }}</td>
+<td class="muted" style="font-family:monospace">{{ '{:,}'.format(r.Members) if r.Members else '—' }}</td>
+<td><span class="score">{{ r.Score }}</span></td>
+<td>
+<div class="avail-chips">
+{% for b in r.branches %}
+{% set s = b.status %}
+{% set short = b.name.replace('Leroy Collins Leon County Main Public Library','Leroy').replace('Bruce J. Host Northeast Branch Library','Bruce').replace('Eastside Branch Library','Eastside').replace('Dr BL Perry Jr Branch Library','Dr BL Perry').replace('Lake Jackson Branch Library','Lake Jackson').replace('Jane G. Sauls Fort Braden Branch Library','Fort Braden').replace('Woodville Branch Library','Woodville') %}
+{% if 'Checked Out' in s %}
+<span class="chip out" title="{{ b.name }} — {{ s }}">{{ short }}: out</span>
+{% elif 'hold' in s.lower() %}
+<span class="chip hold" title="{{ b.name }} — {{ s }}">{{ short }}: hold</span>
+{% elif s %}
+<span class="chip avail" title="{{ b.name }} — {{ s }}">{{ short }}</span>
+{% else %}
+<span class="chip" title="{{ b.name }}">{{ short }}</span>
+{% endif %}
+{% else %}
+<span class="muted" style="font-size:.75rem">not held</span>
+{% endfor %}
+</div>
+</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+
+{% else %}
+<p class="empty">No results found.</p>
+{% endif %}
+
+<script>
+let dirs = {};
+const ths = document.querySelectorAll('#t thead th');
+function sort(col) {
+  const tbody = document.querySelector('#t tbody');
+  const rows  = [...tbody.rows];
+  dirs[col]   = !dirs[col];
+  const dir   = dirs[col] ? 1 : -1;
+  ths.forEach((th, i) => { th.className = i === col ? (dirs[col] ? 'asc' : 'desc') : ''; });
+  rows.sort((a, b) => {
+    const va = a.cells[col].innerText.trim();
+    const vb = b.cells[col].innerText.trim();
+    const na = parseFloat(va.replace(/,/g,'')), nb = parseFloat(vb.replace(/,/g,''));
+    if (!isNaN(na) && !isNaN(nb)) return (na - nb) * dir;
+    return va.toLowerCase() < vb.toLowerCase() ? -dir : va.toLowerCase() > vb.toLowerCase() ? dir : 0;
+  });
+  tbody.append(...rows);
+}
+</script>
+</body>
+</html>

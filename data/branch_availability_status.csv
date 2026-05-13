@@ -1,1 +1,339 @@
 AvailabilityID,BranchID,Status
+13,2,Graphic Novel - Young Adult Fiction
+13,3,Checked Out
+13,5,Graphic Novel - Young Adult Fiction
+13,1,Graphic Novel - Young Adult Fiction
+14,2,Graphic Novel - Young Adult Fiction
+14,3,Checked Out
+14,1,Checked Out
+15,2,Graphic Novel - Young Adult Fiction
+15,3,Graphic Novel - Young Adult Fiction
+15,5,Graphic Novel - Young Adult Fiction
+15,6,Checked Out
+15,1,Graphic Novel - Young Adult Fiction
+16,3,Checked Out
+16,5,Graphic Novel - Young Adult Fiction
+16,1,Graphic Novel - Young Adult Fiction
+17,6,Graphic Novel - Young Adult Fiction
+17,6,Graphic Novel - Young Adult Fiction
+17,1,Graphic Novel - Young Adult Fiction
+18,5,On hold for someone
+18,1,Graphic Novel - Young Adult Fiction
+19,2,Graphic Novel - Young Adult Fiction
+19,1,Graphic Novel - Young Adult Fiction
+20,2,Graphic Novel - Young Adult Fiction
+20,3,Checked Out
+20,5,Graphic Novel - Young Adult Fiction
+20,1,Graphic Novel - Young Adult Fiction
+21,2,Graphic Novel - Young Adult Fiction
+21,3,Graphic Novel - Young Adult Fiction
+21,5,Graphic Novel - Young Adult Fiction
+21,6,Graphic Novel - Young Adult Fiction
+21,6,Graphic Novel - Young Adult Fiction
+22,2,Graphic Novel - Young Adult Fiction
+22,3,Graphic Novel - Young Adult Fiction
+22,5,Graphic Novel - Young Adult Fiction
+22,1,Graphic Novel - Young Adult Fiction
+23,2,Graphic Novel - Young Adult Fiction
+23,3,Graphic Novel - Young Adult Fiction
+23,4,Checked Out
+23,5,Graphic Novel - Young Adult Fiction
+23,6,Graphic Novel - Young Adult Fiction
+23,6,Checked Out
+23,1,Graphic Novel - Young Adult Fiction
+24,2,Graphic Novel - Young Adult Fiction
+24,6,Checked Out
+25,2,Graphic Novel - Young Adult Fiction
+25,3,Graphic Novel - Young Adult Fiction
+25,5,Graphic Novel - Young Adult Fiction
+25,1,Graphic Novel - Young Adult Fiction
+26,5,On hold for someone
+26,1,Graphic Novel - Young Adult Fiction
+27,2,Graphic Novel - Young Adult Fiction
+27,3,Checked Out
+27,5,Graphic Novel - Young Adult Fiction
+27,6,Graphic Novel - Young Adult Fiction
+28,2,Graphic Novel - Young Adult Fiction
+28,3,Graphic Novel - Young Adult Fiction
+28,5,Graphic Novel - Young Adult Fiction
+29,2,Graphic Novel - Young Adult Fiction
+29,3,Graphic Novel - Young Adult Fiction
+29,5,Graphic Novel - Young Adult Fiction
+29,6,Checked Out
+29,1,Checked Out
+30,4,Checked Out
+30,6,Graphic Novel - Young Adult Fiction
+30,1,Checked Out
+31,3,Graphic Novel - Young Adult Fiction
+31,5,Graphic Novel - Young Adult Fiction
+31,1,On hold for someone
+32,3,Graphic Novel - Young Adult Fiction
+32,4,Checked Out
+33,2,Graphic Novel - Young Adult Fiction
+33,3,Graphic Novel - Young Adult Fiction
+33,4,Checked Out
+34,3,Graphic Novel - Young Adult Fiction
+34,4,Checked Out
+34,5,Graphic Novel - Young Adult Fiction
+34,1,Checked Out
+35,3,Graphic Novel - Young Adult Fiction
+35,6,Graphic Novel - Young Adult Fiction
+35,6,Graphic Novel - Young Adult Fiction
+35,6,Graphic Novel - Young Adult Fiction
+35,1,Checked Out
+36,3,Graphic Novel - Young Adult Fiction
+36,5,Graphic Novel - Young Adult Fiction
+36,6,Graphic Novel - Young Adult Fiction
+36,1,Graphic Novel - Young Adult Fiction
+37,2,Graphic Novel - Young Adult Fiction
+37,6,Graphic Novel - Young Adult Fiction
+37,1,Graphic Novel - Young Adult Fiction
+38,2,Graphic Novel - Young Adult Fiction
+38,2,Graphic Novel - Young Adult Fiction
+38,3,Graphic Novel - Young Adult Fiction
+38,1,Checked Out
+39,2,Graphic Novel - Young Adult Fiction
+39,3,Graphic Novel - Young Adult Fiction
+39,5,Graphic Novel - Young Adult Fiction
+39,6,Graphic Novel - Young Adult Fiction
+39,1,Graphic Novel - Young Adult Fiction
+40,2,Graphic Novel - Young Adult Fiction
+40,3,Checked Out
+40,5,Graphic Novel - Young Adult Fiction
+40,6,Graphic Novel - Young Adult Fiction
+40,1,Graphic Novel - Young Adult Fiction
+41,5,Checked Out
+42,2,Graphic Novel - Young Adult Fiction
+42,3,Graphic Novel - Young Adult Fiction
+42,1,Graphic Novel - Young Adult Fiction
+43,2,Graphic Novel - Young Adult Fiction
+43,3,Checked Out
+43,5,Graphic Novel - Young Adult Fiction
+43,1,Graphic Novel - Young Adult Fiction
+44,2,Graphic Novel - Young Adult Fiction
+44,3,Checked Out
+44,5,Graphic Novel - Young Adult Fiction
+44,1,Checked Out
+45,2,Graphic Novel - Young Adult Fiction
+45,3,Checked Out
+45,5,Graphic Novel - Young Adult Fiction
+45,1,Graphic Novel - Young Adult Fiction
+46,2,Graphic Novel - Young Adult Fiction
+46,5,Graphic Novel - Young Adult Fiction
+46,1,Graphic Novel - Young Adult Fiction
+47,3,Graphic Novel - Young Adult Fiction
+47,4,Checked Out
+47,5,Graphic Novel - Young Adult Fiction
+47,6,Checked Out
+48,2,Graphic Novel - Young Adult Fiction
+48,3,Graphic Novel - Young Adult Fiction
+48,5,Graphic Novel - Young Adult Fiction
+48,6,Graphic Novel - Young Adult Fiction
+48,1,Checked Out
+49,2,Graphic Novel - Young Adult Fiction
+49,3,Graphic Novel - Young Adult Fiction
+49,5,Graphic Novel - Young Adult Fiction
+49,6,Graphic Novel - Young Adult Fiction
+49,1,Graphic Novel - Young Adult Fiction
+50,5,Graphic Novel - Young Adult Fiction
+50,6,Graphic Novel - Young Adult Fiction
+50,6,Graphic Novel - Young Adult Fiction
+50,1,Checked Out
+51,2,Graphic Novel - Young Adult Fiction
+51,3,Graphic Novel - Young Adult Fiction
+51,5,Graphic Novel - Young Adult Fiction
+51,1,Graphic Novel - Young Adult Fiction
+52,2,Graphic Novel - Young Adult Fiction
+52,3,Graphic Novel - Young Adult Fiction
+52,5,Graphic Novel - Young Adult Fiction
+52,1,Checked Out
+53,2,Graphic Novel - Young Adult Fiction
+53,3,Checked Out
+53,5,Graphic Novel - Young Adult Fiction
+53,6,Graphic Novel - Young Adult Fiction
+53,1,Graphic Novel - Young Adult Fiction
+54,2,Graphic Novel - Young Adult Fiction
+54,3,Graphic Novel - Young Adult Fiction
+54,5,Graphic Novel - Young Adult Fiction
+54,6,Graphic Novel - Young Adult Fiction
+54,1,Graphic Novel - Young Adult Fiction
+54,1,Graphic Novel - Young Adult Fiction
+55,2,Checked Out
+55,6,Graphic Novel - Young Adult Fiction
+55,6,Graphic Novel - Young Adult Fiction
+56,2,Graphic Novel - Young Adult Fiction
+56,3,Graphic Novel - Young Adult Fiction
+57,2,Graphic Novel - Young Adult Fiction
+57,3,Graphic Novel - Junior Fiction
+57,6,Graphic Novel - Young Adult Fiction
+57,6,Graphic Novel - Young Adult Fiction
+57,1,Graphic Novel - Young Adult Fiction
+58,3,Graphic Novel - Young Adult Fiction
+58,5,Graphic Novel - Young Adult Fiction
+58,6,Graphic Novel - Young Adult Fiction
+58,6,Graphic Novel - Young Adult Fiction
+59,2,Graphic Novel - Young Adult Fiction
+60,2,Graphic Novel - Young Adult Fiction
+60,3,Checked Out
+60,5,Graphic Novel - Young Adult Fiction
+60,6,Graphic Novel - Young Adult Fiction
+60,1,Graphic Novel - Young Adult Fiction
+61,6,Graphic Novel - Young Adult Fiction
+61,1,Checked Out
+62,3,Checked Out
+62,5,Graphic Novel - Young Adult Fiction
+62,6,Graphic Novel - Young Adult Fiction
+62,1,Graphic Novel - Young Adult Fiction
+63,3,Graphic Novel - Young Adult Fiction
+63,5,Graphic Novel - Young Adult Fiction
+63,1,Graphic Novel - Young Adult Fiction
+64,3,Checked Out
+64,5,Checked Out
+64,6,Graphic Novel - Young Adult Fiction
+65,2,Graphic Novel - Young Adult Fiction
+65,3,Graphic Novel - Young Adult Fiction
+65,5,Graphic Novel - Young Adult Fiction
+65,6,Graphic Novel - Young Adult Fiction
+65,1,Graphic Novel - Young Adult Fiction
+66,3,Graphic Novel - Young Adult Fiction
+66,4,Graphic Novel - Young Adult Fiction
+67,6,Graphic Novel - Junior Fiction
+67,1,Graphic Novel - Young Adult Fiction
+68,2,Graphic Novel - Young Adult Fiction
+68,3,Graphic Novel - Young Adult Fiction
+68,5,Graphic Novel - Young Adult Fiction
+68,1,Graphic Novel - Young Adult Fiction
+69,3,Graphic Novel - Young Adult Fiction
+69,5,Graphic Novel - Young Adult Fiction
+70,2,Graphic Novel - Young Adult Fiction
+70,3,Graphic Novel - Young Adult Fiction
+70,6,Graphic Novel - Young Adult Fiction
+70,1,Graphic Novel - Young Adult Fiction
+71,2,Graphic Novel - Young Adult Fiction
+71,3,Graphic Novel - Young Adult Fiction
+71,5,Graphic Novel - Young Adult Fiction
+71,1,Graphic Novel - Young Adult Fiction
+72,2,Graphic Novel - Young Adult Fiction
+72,3,Graphic Novel - Young Adult Fiction
+72,5,Graphic Novel - Young Adult Fiction
+72,1,Graphic Novel - Young Adult Fiction
+74,2,Graphic Novel - Young Adult Fiction
+74,3,Checked Out
+74,5,Graphic Novel - Young Adult Fiction
+74,1,Graphic Novel - Young Adult Fiction
+76,6,Graphic Novel - Young Adult Fiction
+76,1,Graphic Novel - Young Adult Fiction
+77,2,Graphic Novel - Young Adult Fiction
+77,3,Checked Out
+77,6,Graphic Novel - Young Adult Fiction
+77,1,Graphic Novel - Young Adult Fiction
+78,3,Graphic Novel - Young Adult Fiction
+78,5,Graphic Novel - Young Adult Fiction
+78,1,Graphic Novel - Young Adult Fiction
+79,4,Graphic Novel - Young Adult Fiction
+79,5,Graphic Novel - Young Adult Fiction
+79,6,Graphic Novel - Young Adult Fiction
+80,3,Graphic Novel - Young Adult Fiction
+80,5,Graphic Novel - Young Adult Fiction
+80,6,Graphic Novel - Young Adult Fiction
+80,6,Graphic Novel - Young Adult Fiction
+81,3,Graphic Novel - Young Adult Fiction
+81,6,Graphic Novel - Young Adult Fiction
+81,1,Checked Out
+82,2,Graphic Novel - Young Adult Fiction
+82,3,Graphic Novel - Young Adult Fiction
+82,1,Checked Out
+83,6,Graphic Novel - Young Adult Fiction
+83,1,Checked Out
+84,3,Graphic Novel - Young Adult Fiction
+88,5,Graphic Novel - Young Adult Fiction
+88,6,Graphic Novel - Junior Fiction
+88,1,Graphic Novel - Junior Fiction
+89,2,Graphic Novel - Young Adult Fiction
+89,5,Graphic Novel - Young Adult Fiction
+89,1,Graphic Novel - Young Adult Fiction
+90,6,Checked Out
+90,1,Checked Out
+91,5,Graphic Novel - Young Adult Fiction
+91,1,Graphic Novel - Young Adult Fiction
+92,3,Checked Out
+92,6,Graphic Novel - Young Adult Fiction
+92,1,Checked Out
+93,2,Graphic Novel - Young Adult Fiction
+93,3,Graphic Novel - Young Adult Fiction
+93,5,Graphic Novel - Young Adult Fiction
+93,1,Graphic Novel - Young Adult Fiction
+94,6,Graphic Novel - Young Adult Fiction
+94,1,Graphic Novel - Young Adult Fiction
+95,6,Checked Out
+95,1,Checked Out
+96,1,Checked Out
+101,6,Graphic Novel - Young Adult Fiction
+102,3,Checked Out
+102,1,Graphic Novel - Young Adult Fiction
+103,5,Graphic Novel - Young Adult Fiction
+103,6,Graphic Novel - Young Adult Fiction
+103,1,Graphic Novel - Young Adult Fiction
+104,2,Graphic Novel - Young Adult Fiction
+104,3,Checked Out
+104,5,Graphic Novel - Young Adult Fiction
+104,6,Graphic Novel - Young Adult Fiction
+104,1,Checked Out
+105,6,Checked Out
+105,1,Checked Out
+106,3,Graphic Novel - Young Adult Fiction
+106,1,Graphic Novel - Young Adult Fiction
+107,6,Checked Out
+107,1,Checked Out
+108,2,Graphic Novel - Young Adult Fiction
+108,3,Graphic Novel - Young Adult Fiction
+108,1,Graphic Novel - Young Adult Fiction
+109,3,Graphic Novel - Young Adult Fiction
+109,6,Graphic Novel - Young Adult Fiction
+110,6,Graphic Novel - Young Adult Fiction
+110,1,Graphic Novel - Young Adult Fiction
+111,3,Graphic Novel - Young Adult Fiction
+111,6,Graphic Novel - Young Adult Fiction
+112,3,Graphic Novel - Young Adult Fiction
+112,6,Graphic Novel - Young Adult Fiction
+113,3,Graphic Novel - Young Adult Fiction
+113,6,Graphic Novel - Young Adult Fiction
+114,3,Graphic Novel - Young Adult Fiction
+114,1,Graphic Novel - Young Adult Fiction
+115,3,Graphic Novel - Young Adult Fiction
+115,6,Graphic Novel - Young Adult Fiction
+116,3,Graphic Novel - Young Adult Fiction
+116,6,Graphic Novel - Young Adult Fiction
+117,6,Graphic Novel - Young Adult Fiction
+118,1,Graphic Novel - Young Adult Fiction
+119,6,Graphic Novel - Young Adult Fiction
+119,1,Graphic Novel - Young Adult Fiction
+120,3,Graphic Novel - Young Adult Fiction
+120,6,Graphic Novel - Young Adult Fiction
+132,6,Graphic Novel - Young Adult Fiction
+133,6,Graphic Novel - Young Adult Fiction
+134,6,Graphic Novel - Young Adult Fiction
+135,6,Graphic Novel - Young Adult Fiction
+136,6,Graphic Novel - Young Adult Fiction
+137,6,Graphic Novel - Young Adult Fiction
+138,6,Graphic Novel - Young Adult Fiction
+139,2,Graphic Novel - Young Adult Fiction
+139,6,Graphic Novel - Young Adult Fiction
+140,6,Graphic Novel - Young Adult Fiction
+141,6,Graphic Novel - Young Adult Fiction
+142,6,Graphic Novel - Young Adult Fiction
+143,6,Graphic Novel - Young Adult Fiction
+144,6,Graphic Novel - Young Adult Fiction
+145,2,Graphic Novel - Young Adult Fiction
+145,6,Graphic Novel - Young Adult Fiction
+146,6,Graphic Novel - Young Adult Fiction
+147,6,Graphic Novel - Young Adult Fiction
+148,6,Graphic Novel - Young Adult Fiction
+149,2,Checked Out
+150,2,Graphic Novel - Young Adult Fiction
+150,6,Graphic Novel - Young Adult Fiction
+151,6,Graphic Novel - Junior Fiction
+152,6,Graphic Novel - Young Adult Fiction
+153,6,Graphic Novel - Young Adult Fiction
+154,6,Graphic Novel - Junior Fiction
+155,6,Graphic Novel - Young Adult Fiction

@@ -1,62 +1,24 @@
-import pymysql
-import csv
 import sys
-import requests
-import urllib.parse
-import time
-import os
+from pathlib import Path
 
-end_index = int(sys.argv[1])
+sys.path.append(str(Path(__file__).parent.parent))
 
-API_URL = "https://www.googleapis.com/books/v1/volumes"
-VALID_AUTHORS_PATH = "/home/ethan/Documents/School/DataStructures/Final/data/valid_authors.txt"
-OUTPUT_CSV_PATH = "/home/ethan/Documents/School/DataStructures/Final/data/titles.txt"
-AUTHORS_PATH = "/home/ethan/Documents/School/DataStructures/Final/data/authors.txt"
+from services.api_service import get_authors_from_api
+from config.settings import DATA_DIR
 
-def get_books_data(title):
-    try:
-        query = urllib.parse.quote(title)
-        params = {"q": title}
-        response = requests.get(API_URL, params=params)
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        print(f"Error fetching data for {title}: {e}")
-        return {}
+def main():
+    if len(sys.argv) != 2:
+        print("Usage: python get_authors.py <number_of_authors>")
+        sys.exit(1)
+    
+    num_authors = int(sys.argv[1])
+    
+    if get_authors_from_api(num_authors):
+        print(f"Successfully processed {num_authors} authors")
+    else:
+        print("Failed to process authors")
+        sys.exit(1)
 
-def find_valid_author(data, valid_names):
-    for item in data.get("items", []):
-        authors = item["volumeInfo"].get("authors", [])
-        for author in authors:
-            parts = author.strip().split()
-            if parts and parts[-1].lower() in valid_names:
-                return author
-    return None
+if __name__ == "__main__":
+    main()
 
-with open(VALID_AUTHORS_PATH, "r", encoding="utf-8") as f:
-    valid_names = {line.strip().lower() for line in f}
-
-conn = pymysql.connect(host='localhost', user='root', password='4756', db='manga')
-cursor = conn.cursor()
-cursor.execute("SELECT title FROM manga")
-rows = cursor.fetchall()
-conn.close()
-
-titles = [row[0] for row in rows][:end_index]
-
-authors_output = []
-with open(OUTPUT_CSV_PATH, "w", newline="", encoding="utf-8") as title_file:
-    writer = csv.writer(title_file)
-    for title in titles:
-        data = get_books_data(title)
-        writer.writerow([title])
-
-        author = find_valid_author(data, valid_names)
-        authors_output.append(author.strip().split()[-1] if author else "")
-
-        time.sleep(0.1)
-
-# Write authors
-with open(AUTHORS_PATH, "w", encoding="utf-8") as f:
-    for last_name in authors_output:
-        f.write(f"{last_name}\n")

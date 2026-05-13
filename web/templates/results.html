@@ -1,94 +1,116 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>Search Results</title>
-    <style>
-        th {
-            cursor: pointer;
-            text-decoration: underline;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Search Results</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-    <h2>{{ count }} Results</h2>
+<div class="shell">
 
-    {% if status_summary %}
-    <div style="margin-bottom: 1em;">
-        {% for status, count in status_summary.items() %}
-            <span style="margin-right: 1em;">{{ status }}: {{ count }}</span>
+  <div class="results-top">
+    <span class="results-count">{{ count }} result{{ 's' if count != 1 }}</span>
+    <a class="back-link" href="/">← Back</a>
+  </div>
+
+  {% if status_summary %}
+  <div class="summary-row">
+    {% for s, c in status_summary.items() %}
+      {% if 'Checked Out' in s %}
+        <span class="badge out">Checked out: {{ c }}</span>
+      {% elif 'Graphic Novel' in s or 'Youth Fiction' in s or 'Adult Non-Fiction' in s %}
+        <span class="badge avail">{{ s }}: {{ c }}</span>
+      {% elif 'hold' in s.lower() %}
+        <span class="badge hold">On hold: {{ c }}</span>
+      {% else %}
+        <span class="badge">{{ s }}: {{ c }}</span>
+      {% endif %}
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if results %}
+  <div class="card" style="padding:0;overflow:hidden">
+    <table class="results-table" id="t">
+      <thead>
+        <tr>
+          <th onclick="sort(0)">Title</th>
+          <th onclick="sort(1)">Vol</th>
+          <th onclick="sort(2)">Score</th>
+          <th onclick="sort(3)">Type</th>
+          <th onclick="sort(4)">Members</th>
+          <th>Availability</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in results %}
+        <tr>
+          <td class="title-cell">
+            <strong>{{ r.Title }}</strong>
+            <span>{{ r.Volumes or '?' }} vols total</span>
+          </td>
+          <td style="font-family:var(--mono)">{{ r.Volume or '—' }}</td>
+          <td><span class="score-val">{{ r.Score }}</span></td>
+          <td style="font-size:.78rem">{{ r.Type }}</td>
+          <td style="font-family:var(--mono);">
+            {{ '{:,}'.format(r.Members) if r.Members else '—' }}
+          </td>
+          <td>
+            <div class="avail-chips">
+              {% for b in r.branches %}
+                {% set s = b.status %}
+                {% set short = b.name.split(' ')[0] %}
+                {% if 'Checked Out' in s %}
+                  <span class="chip out" title="{{ b.name }} — {{ s }}">{{ short }}: out</span>
+                {% elif 'hold' in s.lower() %}
+                  <span class="chip hold" title="{{ b.name }} — {{ s }}">{{ short }}: hold</span>
+                {% elif s %}
+                  <span class="chip avail" title="{{ b.name }} — {{ s }}">{{ short }}</span>
+                {% else %}
+                  <span class="chip" title="{{ b.name }}">{{ short }}</span>
+                {% endif %}
+              {% else %}
+                <span style="color:var(--text3);font-size:.75rem;font-family:var(--mono)">not held</span>
+              {% endfor %}
+            </div>
+          </td>
+        </tr>
         {% endfor %}
-    </div>
-    {% endif %}
+      </tbody>
+    </table>
+  </div>
 
-    <a href="/">← Back to Search</a>    
+  {% else %}
+  <p class="empty">No results found.</p>
+  {% endif %}
 
-    {% if results %}
-        <table border="1" id="resultsTable">
-            <thead>
-                <tr>
-                    <th onclick="sortTable(0)">Title</th>
-                    <th onclick="sortTable(1)">Volume</th>
-                    <th onclick="sortTable(3)">Volumes</th>
-                    <th onclick="sortTable(2)">Type</th>
-                    <th onclick="sortTable(4)">Members</th>
-                    <th onclick="sortTable(5)">Score</th>
-                    <th onclick="sortTable(6)">Branch</th>
-                    <th onclick="sortTable(7)">Status</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for row in results %}
-                <tr>
-                    <td>{{ row.Title }}</td>
-                    <td>{{ row.Volume or 'N/A' }}</td>
-                    <td>{{ row.Volumes }}</td>
-                    <td>{{ row.Type }}</td>
-                    <td>{{ row.Members }}</td>
-                    <td>{{ row.Score }}</td>
-                    <td>{{ row.BranchName or 'N/A' }}</td>
-                    <td>{{ row.Status or 'N/A' }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    {% else %}
-        <p>No results found.</p>
-    {% endif %}
+</div>
+<script>
+let dirs = {};
+const ths = document.querySelectorAll('#t thead th');
 
-    <script>
-        let sortDirections = {};
-    
-        function sortTable(columnIndex) {
-            const table = document.getElementById("resultsTable");
-            const rows = Array.from(table.tBodies[0].rows); 
-    
-            sortDirections[columnIndex] = !sortDirections[columnIndex];
-            const direction = sortDirections[columnIndex] ? 1 : -1;
-    
-            rows.sort((a, b) => {
-                let valA = a.cells[columnIndex].innerText.trim();
-                let valB = b.cells[columnIndex].innerText.trim();
-    
-                const numA = parseFloat(valA);
-                const numB = parseFloat(valB);
-                const isNumeric = !isNaN(numA) && !isNaN(numB);
-    
-                if (isNumeric) {
-                    return (numA - numB) * direction;
-                } else {
-                    valA = valA.toLowerCase();
-                    valB = valB.toLowerCase();
-                    if (valA > valB) return direction;
-                    if (valA < valB) return -direction;
-                    return 0;
-                }
-            });
-    
-            const tbody = table.querySelector("tbody");
-            tbody.innerHTML = "";
-            rows.forEach(row => tbody.appendChild(row));
-        }
-    </script>
+function sort(col) {
+  const tbody = document.querySelector('#t tbody');
+  const rows  = [...tbody.rows];
+  dirs[col]   = !dirs[col];
+  const dir   = dirs[col] ? 1 : -1;
+
+  ths.forEach((th, i) => {
+    th.className = i === col ? (dirs[col] ? 'asc' : 'desc') : '';
+  });
+
+  rows.sort((a, b) => {
+    const va = a.cells[col].innerText.trim();
+    const vb = b.cells[col].innerText.trim();
+    const na = parseFloat(va), nb = parseFloat(vb);
+    if (!isNaN(na) && !isNaN(nb)) return (na - nb) * dir;
+    return va.toLowerCase() < vb.toLowerCase() ? -dir
+         : va.toLowerCase() > vb.toLowerCase() ? dir : 0;
+  });
+
+  tbody.append(...rows);
+}
+</script>
 </body>
 </html>

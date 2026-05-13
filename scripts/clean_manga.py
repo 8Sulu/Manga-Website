@@ -1,6 +1,9 @@
 import csv
+from pathlib import Path
 
-with open('../manga-backup.csv', mode='r', newline='', encoding='utf-8') as infile:
+BASE = Path(__file__).parent.parent / 'data'
+
+with open(BASE / 'manga-backup.csv', ...) as infile:
     reader = csv.DictReader(infile)
     original_rows = list(reader)
 
@@ -16,7 +19,7 @@ with open('../manga-backup.csv', mode='r', newline='', encoding='utf-8') as infi
 
     cleaned_rows.sort(key=lambda x: float(x['Score']) if x['Score'] != '?' else 0, reverse=True)
 
-    with open('../manga.csv', mode='w', newline='', encoding='utf-8') as outfile:
+    with open(BASE / 'manga.csv', ...) as outfile:
         writer = csv.DictWriter(outfile, fieldnames=fieldnames)
         writer.writeheader()
         for row in cleaned_rows:

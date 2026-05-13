@@ -2,95 +2,283 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Manga Search</title>
+    <title>Leon County Library — Manga</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        /* ── job-progress widget ─────────────────────────────────── */
+        .job-box {
+            display: none;
+            margin-top: .75rem;
+            padding: .65rem .9rem;
+            border-radius: 6px;
+            background: #16161a;
+            border: 1px solid #2a2a35;
+            font-size: .82rem;
+            color: #c0c0d0;
+        }
+        .job-box.visible { display: block; }
+        .job-label {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: .4rem;
+        }
+        .job-label .job-name  { color: #a99ff8; font-weight: 600; }
+        .job-label .job-msg   { color: #888; font-family: monospace; font-size: .78rem; max-width: 55%; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
+        .job-label .job-pct   { color: #3ecf8e; font-family: monospace; }
+        progress {
+            width: 100%;
+            height: 6px;
+            border: none;
+            border-radius: 99px;
+            appearance: none;
+            background: #2a2a35;
+        }
+        progress::-webkit-progress-bar   { background: #2a2a35; border-radius: 99px; }
+        progress::-webkit-progress-value { background: #7c6af7; border-radius: 99px; }
+        progress::-moz-progress-bar      { background: #7c6af7; border-radius: 99px; }
+        .job-box.done progress::-webkit-progress-value { background: #3ecf8e; }
+        .job-box.done progress::-moz-progress-bar      { background: #3ecf8e; }
+        .job-box.error { border-color: rgba(248,113,113,.4); }
+        .job-box.error .job-name { color: #f87171; }
+    </style>
 </head>
 <body>
-    <h2>Search Manga</h2>
-    <form method="get" action="/search">
-        <div style="margin-bottom: 1em;">
-            <input type="checkbox" id="only_available" name="only_available" value="1">
-            <label for="only_available">Only Show Available</label>
-        </div>
-        <input type="text" name="title" placeholder="Title">
-        <input type="text" name="volume" placeholder="Volume">
-        <select name="type">
-            <option value="">All Types</option>
-            <option value="Manga">Manga</option>
-            <option value="One-shot">One-shot</option>
-            <option value="Doujinshi">Doujinshi</option>
-            <option value="Light-Novel">Light Novel</option>
-            <option value="Novel">Novel</option>
-            <option value="Manhwa">Manhwa</option>
-            <option value="Manhua">Manhua</option>
-        </select>
-        <select name="branch">
-            <option value="">All Branches</option>
-            <option value="Leroy Collins Leon County Main Public Library">MAIN</option>
-            <option value="Bruce J. Host Northeast Branch Library">NORTHEAST</option>
-            <option value="Lake Jackson Branch Library">LAKEJAX</option>
-            <option value="Eastside Branch Library">EASTSIDE</option>
-            <option value="Dr BL Perry Jr Branch Library">BLPERRY</option>
-            <option value="Woodville Branch Library">WOODVILLE</option>
-            <option value="Jane G. Sauls Ft. Braden Branch Library">FTBRADEN</option>
-        </select>
-        <select name="status">
-            <option value="">All Statuses</option>
-            <option value="Graphic Novel">Graphic Novel</option>
-            <option value="Checked Out">Checked Out</option>
-            <option value="On hold for someone">On Hold</option>
-            <option value="Youth Fiction">Youth Fiction</option>
-            <option value="Adult Non-Fiction">Adult Non-Fiction</option>
-            <option value="Being transferred between libraries">Being transferred between libraries</option>
-            <option value="Being returned to standard shelving location">Being returned to standard shelving location</option>
-            <option value="Being acquired by the library">Being acquired by the library</option>
-            <option value="Unkown">Unkown</option>
-        </select>
-        <button type="submit">Search</button>
-    </form>
-    <div style="display: flex; gap: 0.5em; margin-top: 1em;">
-        <b>Drop Tables and Insert Data:</b>
-        <form action="/reset" method="post">
-            <button type="submit">Reset Data</button>
+    <h1>📚 Leon County Library — Manga</h1>
+
+    <!-- Search -->
+    <div class="card">
+        <h2>Search</h2>
+        <form method="get" action="/search">
+            <div class="row" style="margin-bottom:0.5rem;">
+                <input type="text"   name="title"  placeholder="Title">
+                <input type="number" name="volume" placeholder="Volume" style="width:90px">
+                <select name="type">
+                    <option value="">All Types</option>
+                    <option>Manga</option>
+                    <option>One-shot</option>
+                    <option>Doujinshi</option>
+                    <option value="Light-Novel">Light Novel</option>
+                    <option>Novel</option>
+                    <option>Manhwa</option>
+                    <option>Manhua</option>
+                </select>
+                <select name="branch">
+                    <option value="">All Branches</option>
+                    <option value="Leroy Collins Leon County Main Public Library">MAIN</option>
+                    <option value="Bruce J. Host Northeast Branch Library">NORTHEAST</option>
+                    <option value="Lake Jackson Branch Library">LAKEJAX</option>
+                    <option value="Eastside Branch Library">EASTSIDE</option>
+                    <option value="Dr BL Perry Jr Branch Library">BLPERRY</option>
+                    <option value="Woodville Branch Library">WOODVILLE</option>
+                    <option value="Jane G. Sauls Fort Braden Branch Library">FTBRADEN</option>
+                </select>
+            </div>
+            <div class="row">
+                <label class="inline">
+                    <input type="checkbox" name="only_available" value="1"> Available only
+                </label>
+                <button type="submit">Search</button>
+            </div>
         </form>
     </div>
-    <b>Branches With More Than 10 Volumes of Manga:</b>
-    <table border="1">
-        <tr>
-            <th>Branch Name</th>
-            <th>Manga Count</th>
-        </tr>
-        {% for row in manga_per_library %}
-        <tr>
-            <td>{{ row.BranchName }}</td>
-            <td>{{ row.VolumeCount }}</td>
-        </tr>
-        {% endfor %}
-    </table>
-    <form method="POST">
-        <input type="hidden" name="action" value="update">
-        <b>Update Volumes:</b>
-        <input type="text" name="title" placeholder="Title" required>
-        <input type="number" name="volume" placeholder="Volumes" required>
-        <button type="submit">Submit</button>
-    </form>
-    <form method="POST">
-        <input type="hidden" name="action" value="delete">
-        <b>Delete Volume:</b>
-        <input type="text" name="title" placeholder="Title" required>
-        <input type="number" name="volume" placeholder="Volume" required>
-        <button type="submit">Submit</button>
-    </form>
-    <form method="POST">
-        <input type="hidden" name="action" value="get_authors">
-        <b>Get Authors:</b>
-        <input type="number" name="authors" placeholder="Number of Authors" required>
-        <button type="submit">Submit</button>
-    </form>
-    <form method="POST">
-        <input type="hidden" name="action" value="scrape">
-        <b>Scrape Library:</b>
-        <input type="number" name="books" placeholder="Number of Books" required>
-        <button type="submit">Submit</button>
-    </form>
+
+    <!-- Tools -->
+    <div class="card">
+        <h2>Tools</h2>
+        <div class="row">
+
+            <!-- Reset DB (regular form — quick, no progress needed) -->
+            <form action="/reset" method="post">
+                <button type="submit" class="danger"
+                    onclick="return confirm('Drop and re-seed all tables?')">Reset DB</button>
+            </form>
+
+            <!-- Update Volumes (regular form) -->
+            <form method="POST">
+                <input type="hidden" name="action" value="update">
+                <input type="text"   name="title"  placeholder="Title"   required style="width:140px">
+                <input type="number" name="volume" placeholder="Volumes" required style="width:80px">
+                <button type="submit">Update Volumes</button>
+            </form>
+
+            <!-- Delete Volume (regular form) -->
+            <form method="POST">
+                <input type="hidden" name="action" value="delete">
+                <input type="text"   name="title"  placeholder="Title"  required style="width:140px">
+                <input type="number" name="volume" placeholder="Volume" required style="width:80px">
+                <button type="submit">Delete Volume</button>
+            </form>
+
+            <!-- Get Authors — AJAX, with progress -->
+            <form id="form-get-authors" onsubmit="return startJob(event, 'get_authors', 'Get Authors')">
+                <input type="hidden" name="action" value="get_authors">
+                <input type="number" name="authors" id="authors-input"
+                       placeholder="# Authors" required style="width:90px">
+                <button type="submit" id="btn-get-authors">Get Authors</button>
+            </form>
+
+            <!-- Get Titles — AJAX, with progress -->
+            <form id="form-get-titles" onsubmit="return startJob(event, 'get_titles', 'Get Titles')">
+                <input type="hidden" name="action" value="get_titles">
+                <input type="number" name="titles" id="titles-input"
+                       placeholder="# Titles" required style="width:90px">
+                <button type="submit" id="btn-get-titles">Get Titles</button>
+            </form>
+
+            <!-- Scrape — AJAX, with progress -->
+            <form id="form-scrape" onsubmit="return startJob(event, 'scrape', 'Scrape')">
+                <input type="hidden" name="action" value="scrape">
+                <input type="number" name="books" id="books-input"
+                       placeholder="# Titles" required style="width:90px">
+                <button type="submit" id="btn-scrape">Scrape</button>
+            </form>
+
+        </div>
+
+        <!-- ── Progress boxes (one per async job) ────────────────── -->
+        <div id="job-get_authors" class="job-box">
+            <div class="job-label">
+                <span class="job-name">Get Authors</span>
+                <span class="job-msg"  id="job-get_authors-msg">starting…</span>
+                <span class="job-pct"  id="job-get_authors-pct">0 %</span>
+            </div>
+            <progress id="job-get_authors-bar" value="0" max="100"></progress>
+        </div>
+
+        <div id="job-get_titles" class="job-box">
+            <div class="job-label">
+                <span class="job-name">Get Titles</span>
+                <span class="job-msg"  id="job-get_titles-msg">starting…</span>
+                <span class="job-pct"  id="job-get_titles-pct">0 %</span>
+            </div>
+            <progress id="job-get_titles-bar" value="0" max="100"></progress>
+        </div>
+
+        <div id="job-scrape" class="job-box">
+            <div class="job-label">
+                <span class="job-name">Scrape</span>
+                <span class="job-msg"  id="job-scrape-msg">starting…</span>
+                <span class="job-pct"  id="job-scrape-pct">0 %</span>
+            </div>
+            <progress id="job-scrape-bar" value="0" max="100"></progress>
+        </div>
+
+    </div>
+
+    <!-- Stats -->
+    <div class="card">
+        <h2>Branches with more than 10 volumes</h2>
+        <table>
+            <thead>
+                <tr><th>Branch</th><th>Volumes</th></tr>
+            </thead>
+            <tbody>
+                {% for row in manga_per_library %}
+                <tr>
+                    <td>{{ row.BranchName }}</td>
+                    <td>{{ row.VolumeCount }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="2" style="color:#888">No data — run a scrape or reset the DB.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+    /* ── Job polling ─────────────────────────────────────────────── */
+
+    const POLL_MS   = 1000;   // poll interval while running
+    const DONE_MS   = 3000;   // keep "done" visible before hiding
+    const pollers   = {};     // jobName → intervalId
+
+    function startJob(evt, jobName, label) {
+        evt.preventDefault();
+        const form = evt.target;
+        const btn  = form.querySelector('button[type=submit]');
+
+        // Don't start a duplicate while one is already running
+        if (pollers[jobName]) return false;
+
+        btn.disabled = true;
+
+        // POST via fetch so the page doesn't navigate away
+        const body = new FormData(form);
+        fetch('/', { method: 'POST', body })
+            .then(r => {
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                showJobBox(jobName, 0, 'starting…');
+                pollers[jobName] = setInterval(() => pollJob(jobName, btn), POLL_MS);
+            })
+            .catch(err => {
+                showJobBox(jobName, 0, `error: ${err.message}`, true);
+                btn.disabled = false;
+            });
+
+        return false;
+    }
+
+    function pollJob(jobName, btn) {
+        fetch(`/api/job/${jobName}`)
+            .then(r => r.json())
+            .then(data => {
+                if (!data || Object.keys(data).length === 0) return; // not started yet
+
+                const pct = data.progress || 0;
+                const msg = data.message  || '';
+                const isError = (msg || '').startsWith('error:');
+
+                showJobBox(jobName, pct, msg, isError);
+
+                if (!data.running) {
+                    clearInterval(pollers[jobName]);
+                    delete pollers[jobName];
+                    btn.disabled = false;
+                    // Auto-hide the box after a short delay
+                    setTimeout(() => hideJobBox(jobName), DONE_MS);
+                }
+            })
+            .catch(() => {}); // silently ignore transient network errors
+    }
+
+    function showJobBox(jobName, pct, msg, isError = false) {
+        const box = document.getElementById(`job-${jobName}`);
+        if (!box) return;
+        box.classList.add('visible');
+        box.classList.toggle('error', isError);
+        box.classList.toggle('done',  !isError && pct >= 100);
+
+        document.getElementById(`job-${jobName}-bar`).value = pct;
+        document.getElementById(`job-${jobName}-pct`).textContent = `${pct} %`;
+
+        // Truncate long messages from the right so the most recent part shows
+        const msgEl = document.getElementById(`job-${jobName}-msg`);
+        msgEl.textContent = msg;
+        msgEl.title = msg; // full text on hover
+    }
+
+    function hideJobBox(jobName) {
+        const box = document.getElementById(`job-${jobName}`);
+        if (box) box.classList.remove('visible', 'done', 'error');
+    }
+
+    /* ── On load: resume any in-progress jobs left from a page reload ── */
+    ['get_authors', 'get_titles', 'scrape'].forEach(jobName => {
+        fetch(`/api/job/${jobName}`)
+            .then(r => r.json())
+            .then(data => {
+                if (data && data.running) {
+                    showJobBox(jobName, data.progress || 0, data.message || '');
+                    const form = document.getElementById(`form-${jobName}`);
+                    const btn  = form && form.querySelector('button[type=submit]');
+                    if (btn) btn.disabled = true;
+                    pollers[jobName] = setInterval(() => pollJob(jobName, btn), POLL_MS);
+                }
+            })
+            .catch(() => {});
+    });
+    </script>
 </body>
 </html>
