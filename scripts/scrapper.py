@@ -39,6 +39,17 @@ RESULTS_PER_PAGE = 12
 REQUEST_DELAY    = 0.5
 MAX_RETRIES      = 3
 
+def _load_title_author_map() -> list[tuple[int, str, str]]:
+    """Return list of (index, title, author) from the manga DB table, ordered by MangaID."""
+    from config.settings import DB_CONFIG
+    import mysql.connector
+    conn = mysql.connector.connect(**DB_CONFIG)
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT MangaID, Title, Author FROM manga ORDER BY MangaID")
+    rows = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    return [(i + 1, r['Title'], r['Author'] or '') for i, r in enumerate(rows)]
 
 # ── manga.csv → MAL ID map ────────────────────────────────────────────────────
 
@@ -364,40 +375,49 @@ def scrape(start: int = 1, end: int = 1,
     return all_books
 
 
-# ── CSV output ────────────────────────────────────────────────────────────────
+def write_to_db(books: list) -> str:
+    from config.settings import DB_CONFIG
+    import mysql.connector
+    conn = mysql.connector.connect(**DB_CONFIG)
+    cursor = conn.cursor()
 
-def write_csvs(books: list) -> None:
-    branch_id_map = {k.upper(): v for k, v in BRANCH_MAPPING.items()}
+    manga_ids = list({b["manga_id"] for b in books})
+    # Delete old LCPL rows for these titles only
+    cursor.execute("""
+        DELETE bas FROM branch_availability_status bas
+        JOIN availability a ON bas.AvailabilityID = a.AvailabilityID
+        JOIN branch b ON bas.BranchID = b.BranchID
+        JOIN library l ON b.LibraryID = l.LibraryID
+        WHERE a.MangaID IN ({})
+          AND l.LibraryName LIKE '%Leon%'
+    """.format(','.join(['%s'] * len(manga_ids))), tuple(manga_ids))
+    cursor.execute("""
+        DELETE a FROM availability a
+        LEFT JOIN branch_availability_status bas ON a.AvailabilityID = bas.AvailabilityID
+        JOIN branch b ON bas.BranchID = b.BranchID  
+        JOIN library l ON b.LibraryID = l.LibraryID
+        WHERE a.MangaID IN ({})
+          AND l.LibraryName LIKE '%Leon%'
+          AND bas.AvailabilityID IS NULL
+    """.format(','.join(['%s'] * len(manga_ids))), tuple(manga_ids))
 
-    avail_path = DATA_DIR / "availability.csv"
-    bas_path   = DATA_DIR / "branch_availability_status.csv"
-
-    with open(avail_path, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=["AvailabilityID", "MangaID", "Volume"])
-        w.writeheader()
-        for b in books:
-            w.writerow({
-                "AvailabilityID": b["availability_id"],
-                "MangaID":        b["manga_id"],
-                "Volume":         b["volume"],
-            })
-
-    with open(bas_path, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=["AvailabilityID", "BranchID", "Status"])
-        w.writeheader()
-        for b in books:
-            for branch, status in b["branch_status"]:
-                branch_id = branch_id_map.get(branch.upper(), -1)
-                if branch_id == -1:
-                    log.warning(f"  Unknown branch key (skipped): {branch!r}")
-                    continue
-                w.writerow({
-                    "AvailabilityID": b["availability_id"],
-                    "BranchID":       branch_id,
-                    "Status":         status,
-                })
-
-    log.info(f"Wrote {len(books)} availability rows → {avail_path.name}, {bas_path.name}")
+    branch_id_map = _load_branch_id_map(cursor)  # SELECT BranchID, BranchName FROM branch
+    inserted = 0
+    for b in books:
+        cursor.execute("INSERT INTO availability (MangaID, Volume) VALUES (%s, %s)",
+                       (b["manga_id"], b["volume"]))
+        avail_id = cursor.lastrowid
+        for branch_key, status in b["branch_status"]:
+            branch_id = branch_id_map.get(branch_key.upper())
+            if branch_id:
+                cursor.execute(
+                    "INSERT INTO branch_availability_status (AvailabilityID, BranchID, Status) "
+                    "VALUES (%s, %s, %s)", (avail_id, branch_id, status))
+                inserted += 1
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return f"inserted {inserted} LCPL availability rows"
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -461,4 +481,4 @@ if __name__ == "__main__":
         print(__doc__)
         sys.exit(1)
 
-    write_csvs(books)
+    write_to_db(books)

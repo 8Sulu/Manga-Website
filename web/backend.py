@@ -271,61 +271,6 @@ def insert_csv(filename, query):
     except Exception as e:
         return f'✗ {filename}: {e}'
 
-def upsert_availability_from_csvs() -> str:
-    avail_path = DATA_DIR / "availability.csv"
-    bas_path   = DATA_DIR / "branch_availability_status.csv"
-    if not avail_path.exists(): return "availability.csv not found"
-    if not bas_path.exists():   return "branch_availability_status.csv not found"
-
-    avail_rows = []
-    with open(avail_path, encoding="utf-8-sig") as f:
-        for row in csv.DictReader(f):
-            avail_rows.append({
-                "csv_id": int(row["AvailabilityID"]),
-                "manga_id": int(row["MangaID"]),
-                "volume": int(row["Volume"]) if row["Volume"] else 0
-            })
-
-    bas_by_csv_id = defaultdict(list)
-    with open(bas_path, encoding="utf-8-sig") as f:
-        for row in csv.DictReader(f):
-            bas_by_csv_id[int(row["AvailabilityID"])].append({
-                "branch_id": int(row["BranchID"]),
-                "status": row["Status"]
-            })
-
-    if not avail_rows: return "availability.csv is empty"
-
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT MangaID FROM manga")
-        valid_manga_ids = {r[0] for r in cursor.fetchall()}
-
-        valid_avail_rows = [r for r in avail_rows if r["manga_id"] in valid_manga_ids]
-        if not valid_avail_rows: return "No availability rows matched existing MangaIDs"
-
-        manga_ids = sorted({r["manga_id"] for r in valid_avail_rows})
-        inserted_avail = inserted_bas = 0
-
-        placeholders = ",".join(["%s"] * len(manga_ids))
-        cursor.execute(f"DELETE FROM availability WHERE MangaID IN ({placeholders})", tuple(manga_ids))
-        deleted = cursor.rowcount
-
-        for row in valid_avail_rows:
-            cursor.execute("INSERT INTO availability (MangaID, Volume) VALUES (%s, %s)",
-                           (row["manga_id"], row["volume"]))
-            db_avail_id = cursor.lastrowid
-            inserted_avail += 1
-            for bas in bas_by_csv_id.get(row["csv_id"], []):
-                cursor.execute(
-                    "INSERT INTO branch_availability_status (AvailabilityID, BranchID, `Status`) VALUES (%s,%s,%s)",
-                    (db_avail_id, bas["branch_id"], bas["status"]))
-                inserted_bas += 1
-        conn.commit()
-
-    return (f"Updated MangaIDs {manga_ids[0]}–{manga_ids[-1]}: "
-            f"deleted {deleted} old, inserted {inserted_avail} avail + {inserted_bas} branch rows")
-
 # ── Admin auth routes ──────────────────────────────────────────────────────────
 
 @app.route('/admin/login', methods=['GET', 'POST'])
@@ -388,12 +333,7 @@ def admin():
                     end   = int(request.form.get('end', 1))
                 cmd = [sys.executable, str(SCRIPTS_DIR / 'scrapper.py'), str(start), str(end)]
 
-            def post_hook():
-                msg = upsert_availability_from_csvs()
-                _append_scrape_log(0, 0, msg)
-                return msg
-
-            ok, status, msg = _start_job_thread('scrape', cmd, post_hook=post_hook)
+            ok, status, msg = _start_job_thread('scrape', cmd)
             return jsonify({'ok': ok, 'message': msg}), status
 
         elif action == 'scrape_broward':
@@ -441,39 +381,6 @@ def admin():
     return render_template('admin.html',
                            manga_per_library=manga_per_library,
                            job_history=job_history)
-
-@app.route('/admin/reset', methods=['POST'])
-@admin_required
-def admin_reset_database():
-    messages = []
-    try:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('SET FOREIGN_KEY_CHECKS=0')
-            for cmd in SCHEMA.strip().split(';'):
-                cmd = cmd.strip()
-                if cmd: cursor.execute(cmd)
-            cursor.execute('SET FOREIGN_KEY_CHECKS=1')
-            conn.commit()
-        messages.append('✓ Schema reset')
-    except mysql.connector.Error as e:
-        return jsonify({'ok': False, 'messages': [f'✗ Schema reset failed: {e}']}), 500
-    for filename, query in INSERT_OPS:
-        messages.append(insert_csv(filename, query))
-    try:
-        msg = upsert_availability_from_csvs()
-        messages.append(f'✓ {msg}')
-    except Exception as e:
-        messages.append(f'⚠ availability seed skipped: {e}')
-    # Clear cached library IDs so next search re-reads from the freshly seeded DB
-    _get_library_ids.__dict__.pop('_cache', None)
-    _append_job_history('db-reset', 'done', '; '.join(messages))
-    return jsonify({'ok': True, 'messages': messages})
-
-@app.route('/reset', methods=['POST'])
-@admin_required
-def reset_database():
-    return admin_reset_database()
 
 # ── Public routes ──────────────────────────────────────────────────────────────
 
@@ -624,29 +531,29 @@ def api_add_valid_author():
 
 # ── Search ─────────────────────────────────────────────────────────────────────
 
-def _get_library_ids() -> tuple[int | None, int | None]:
+def _get_library_ids() -> tuple[int, int]:
     """
     Look up LCPL and Broward library IDs by name from the DB.
-    Returns (lcpl_id, broward_id) — either may be None if not seeded yet.
+    Returns (lcpl_id, broward_id) — falls back to (1, 2) if not seeded yet.
     Cached after first successful load.
     """
-    if not hasattr(_get_library_ids, '_cache'):
-        try:
-            rows = execute_query("SELECT LibraryID, LibraryName FROM library")
-            lcpl = broward = None
-            for r in rows:
-                name = r['LibraryName'] or ''
-                if 'Leon' in name or 'LCPL' in name:
-                    lcpl = r['LibraryID']
-                elif 'Broward' in name:
-                    broward = r['LibraryID']
-            if lcpl is not None and broward is not None:
-                _get_library_ids._cache = (lcpl, broward)
-                return lcpl, broward
-        except Exception:
-            pass
-        return None, None
-    return _get_library_ids._cache
+    if hasattr(_get_library_ids, '_cache'):
+        return _get_library_ids._cache
+    try:
+        rows = execute_query("SELECT LibraryID, LibraryName FROM library")
+        lcpl = broward = None
+        for r in rows:
+            name = r['LibraryName'] or ''
+            if 'Leon' in name or 'LCPL' in name:
+                lcpl = r['LibraryID']
+            elif 'Broward' in name:
+                broward = r['LibraryID']
+        if lcpl is not None and broward is not None:
+            _get_library_ids._cache = (lcpl, broward)
+            return lcpl, broward
+    except Exception:
+        pass
+    return 1, 2  # fallback to seed order; not cached so we retry next request
 
 @app.route('/search')
 def search():

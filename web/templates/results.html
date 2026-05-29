@@ -270,7 +270,7 @@
   <div class="results-grid" id="results-grid">
     {% for r in results %}
     {% set lcpl_url = "https://lcpl.ent.sirsi.net/client/en_US/lcpl/search/results?qu=&qu=TITLE%3D" + r.Title|urlencode + "+&qu=AUTHOR%3D" + (r.author or '')|urlencode + "+&te=ILS&h=1" %}
-    {% set broward_url = "https://broward.ent.sirsi.net/client/en_US/default/search/results?qu=" + r.Title|urlencode + "&te=ILS&h=1&lm=BOOKS" %}
+    {% set broward_url = "https://broward.ent.sirsi.net/client/en_US/default/search/results?qu=&qu=TITLE%3D" + r.Title|urlencode + "+&qu=AUTHOR%3D" + (r.author or '')|urlencode + "+&qf=FORMAT%09Special+Format%09BOOK%09Books&h=1" %}
 
     <div class="manga-card"
       data-score="{{ r.Score or 0 }}"
