@@ -1,284 +1,320 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>Leon County Library — Manga</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <style>
-        /* ── job-progress widget ─────────────────────────────────── */
-        .job-box {
-            display: none;
-            margin-top: .75rem;
-            padding: .65rem .9rem;
-            border-radius: 6px;
-            background: #16161a;
-            border: 1px solid #2a2a35;
-            font-size: .82rem;
-            color: #c0c0d0;
-        }
-        .job-box.visible { display: block; }
-        .job-label {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: .4rem;
-        }
-        .job-label .job-name  { color: #a99ff8; font-weight: 600; }
-        .job-label .job-msg   { color: #888; font-family: monospace; font-size: .78rem; max-width: 55%; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
-        .job-label .job-pct   { color: #3ecf8e; font-family: monospace; }
-        progress {
-            width: 100%;
-            height: 6px;
-            border: none;
-            border-radius: 99px;
-            appearance: none;
-            background: #2a2a35;
-        }
-        progress::-webkit-progress-bar   { background: #2a2a35; border-radius: 99px; }
-        progress::-webkit-progress-value { background: #7c6af7; border-radius: 99px; }
-        progress::-moz-progress-bar      { background: #7c6af7; border-radius: 99px; }
-        .job-box.done progress::-webkit-progress-value { background: #3ecf8e; }
-        .job-box.done progress::-moz-progress-bar      { background: #3ecf8e; }
-        .job-box.error { border-color: rgba(248,113,113,.4); }
-        .job-box.error .job-name { color: #f87171; }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Manga @ Leon &amp; Broward County Libraries</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    .portal-hero {
+      min-height: 40vh;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      text-align: center; padding: 4rem 1rem 2rem; position: relative;
+    }
+    .portal-eyebrow {
+      font-family: var(--mono); font-size: .6rem;
+      letter-spacing: .22em; text-transform: uppercase; color: var(--green);
+      margin-bottom: 1rem; display: flex; align-items: center; gap: 10px;
+    }
+    .portal-eyebrow::before, .portal-eyebrow::after {
+      content: ''; display: inline-block; width: 32px; height: 1px; background: var(--green); opacity: .5;
+    }
+    .portal-title {
+      font-family: var(--display); font-size: clamp(2.6rem, 7vw, 5rem);
+      font-weight: 800; letter-spacing: -.04em; line-height: .95; margin-bottom: .6rem;
+    }
+    .portal-title .accent { color: var(--green); }
+    .portal-sub {
+      font-family: var(--mono); font-size: .72rem; color: var(--text3);
+      letter-spacing: .06em; margin-bottom: 2rem;
+    }
+    .portal-stats { display: flex; gap: 2rem; justify-content: center; margin-bottom: 3rem; }
+    .pstat { text-align: center; }
+    .pstat-val { font-family: var(--display); font-size: 1.6rem; font-weight: 700; color: var(--green); display: block; line-height: 1; }
+    .pstat-lbl { font-family: var(--mono); font-size: .58rem; text-transform: uppercase; letter-spacing: .1em; color: var(--text3); margin-top: 3px; display: block; }
+
+    /* ── Search box ──────────────────────────────────────── */
+    .search-wrap { width: 100%; max-width: 640px; margin: 0 auto; position: relative; }
+    .search-input-row {
+      display: flex; gap: 0; border-radius: var(--r-lg);
+      border: 1px solid var(--border2); background: var(--bg3); overflow: hidden;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    .search-input-row:focus-within { border-color: var(--purple); box-shadow: 0 0 0 3px var(--purple-bg); }
+    .search-input-row input[type="text"] {
+      border: none; background: transparent; border-radius: 0;
+      font-size: .95rem; padding: 14px 16px; flex: 1; min-width: 0;
+    }
+    .search-input-row input[type="text"]:focus { box-shadow: none; }
+    .search-go-btn {
+      padding: 0 22px;
+      background: linear-gradient(135deg, var(--purple2), var(--purple));
+      border: none; color: #fff; font-family: var(--mono); font-size: .75rem;
+      letter-spacing: .06em; cursor: pointer; border-radius: 0; flex-shrink: 0; transition: opacity .15s;
+    }
+    .search-go-btn:hover { opacity: .85; }
+
+    /* ── Typeahead ───────────────────────────────────────── */
+    .typeahead-dropdown {
+      position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+      background: var(--bg3); border: 1px solid var(--border2);
+      border-radius: var(--r-lg); overflow: hidden;
+      box-shadow: 0 8px 32px rgba(0,0,0,.45); z-index: 100; display: none;
+    }
+    .typeahead-dropdown.open { display: block; }
+    .ta-item {
+      display: flex; align-items: center; gap: 10px; padding: 10px 16px;
+      cursor: pointer; transition: background .1s; border-bottom: 1px solid var(--border);
+    }
+    .ta-item:last-child { border-bottom: none; }
+    .ta-item:hover, .ta-item.active { background: var(--bg4); }
+    .ta-title { flex: 1; font-size: .84rem; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ta-title em { color: var(--purple); font-style: normal; }
+    .ta-type { font-family: var(--mono); font-size: .6rem; padding: 2px 7px; border-radius: 99px; background: var(--purple-bg); border: 1px solid var(--purple-brd); color: var(--purple); flex-shrink: 0; }
+    .ta-score { font-family: var(--mono); font-size: .7rem; color: var(--green); flex-shrink: 0; min-width: 28px; text-align: right; }
+    .ta-empty { padding: 14px 16px; font-family: var(--mono); font-size: .75rem; color: var(--text3); text-align: center; }
+
+    /* ── Filter row ──────────────────────────────────────── */
+    .filter-row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 1rem; }
+    .filter-select {
+      padding: 6px 12px; font-family: var(--mono); font-size: .72rem;
+      background: var(--bg3); border: 1px solid var(--border2); border-radius: 99px;
+      color: var(--text2); cursor: pointer; outline: none;
+      transition: border-color .15s, color .15s; -webkit-appearance: none;
+    }
+    .filter-select:focus { border-color: var(--purple); color: var(--text); }
+
+    /* ── Availability + library pills ─────────────────────── */
+    .pill-row {
+      display: flex; gap: 6px; justify-content: center; margin-top: .6rem; flex-wrap: wrap;
+    }
+    .pill-btn {
+      font-family: var(--mono); font-size: .68rem; padding: 5px 14px; border-radius: 99px;
+      border: 1px solid var(--border2); background: var(--bg3); color: var(--text3);
+      cursor: pointer; transition: all .15s; text-decoration: none;
+    }
+    .pill-btn:hover { border-color: var(--border3); color: var(--text); }
+    .pill-btn.pill-avail.active   { background: var(--green-bg);  border-color: var(--green-brd);  color: var(--green); }
+    .pill-btn.pill-out.active     { background: var(--red-bg);    border-color: var(--red-brd);    color: var(--red); }
+    .pill-btn.pill-all.active     { background: var(--purple-bg); border-color: var(--purple-brd); color: var(--purple); }
+    .pill-btn.pill-lcpl.active    { background: var(--green-bg);  border-color: var(--green-brd);  color: var(--green); }
+    .pill-btn.pill-broward.active { background: var(--amber-bg);  border-color: var(--amber-brd);  color: var(--amber); }
+    .pill-divider {
+      font-family: var(--mono); font-size: .6rem; color: var(--text3);
+      display: flex; align-items: center; padding: 0 2px; opacity: .4;
+    }
+
+    /* ── Stats section ───────────────────────────────────── */
+    .stats-section { max-width: 760px; margin: 2rem auto 0; }
+    .grid-bg {
+      position: fixed; inset: 0;
+      background-image:
+        linear-gradient(rgba(255,255,255,.015) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.015) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none; z-index: 0;
+    }
+  </style>
 </head>
 <body>
-    <h1>📚 Leon County Library — Manga</h1>
+<div class="grid-bg"></div>
+<div style="position:relative;z-index:1">
 
-    <!-- Search -->
-    <div class="card">
-        <h2>Search</h2>
-        <form method="get" action="/search">
-            <div class="row" style="margin-bottom:0.5rem;">
-                <input type="text"   name="title"  placeholder="Title">
-                <input type="number" name="volume" placeholder="Volume" style="width:90px">
-                <select name="type">
-                    <option value="">All Types</option>
-                    <option>Manga</option>
-                    <option>One-shot</option>
-                    <option>Doujinshi</option>
-                    <option value="Light-Novel">Light Novel</option>
-                    <option>Novel</option>
-                    <option>Manhwa</option>
-                    <option>Manhua</option>
-                </select>
-                <select name="branch">
-                    <option value="">All Branches</option>
-                    <option value="Leroy Collins Leon County Main Public Library">MAIN</option>
-                    <option value="Bruce J. Host Northeast Branch Library">NORTHEAST</option>
-                    <option value="Lake Jackson Branch Library">LAKEJAX</option>
-                    <option value="Eastside Branch Library">EASTSIDE</option>
-                    <option value="Dr BL Perry Jr Branch Library">BLPERRY</option>
-                    <option value="Woodville Branch Library">WOODVILLE</option>
-                    <option value="Jane G. Sauls Fort Braden Branch Library">FTBRADEN</option>
-                </select>
-            </div>
-            <div class="row">
-                <label class="inline">
-                    <input type="checkbox" name="only_available" value="1"> Available only
-                </label>
-                <button type="submit">Search</button>
-            </div>
-        </form>
+  <!-- ── Portal hero ──────────────────────────────────────── -->
+  <div class="portal-hero">
+    <div class="portal-eyebrow">Leon County &amp; Broward County Library Systems</div>
+    <h1 class="portal-title">Manga<span class="accent">.</span><br>Find It Here</h1>
+    <p class="portal-sub">漫画コレクション — Browse the full collection across both library systems</p>
+
+    <div class="portal-stats">
+      <div class="pstat">
+        <span class="pstat-val" id="stat-volumes">—</span>
+        <span class="pstat-lbl">Entries</span>
+      </div>
+      <div class="pstat">
+        <span class="pstat-val" id="stat-titles">—</span>
+        <span class="pstat-lbl">Titles</span>
+      </div>
+      <div class="pstat">
+        <span class="pstat-val">2</span>
+        <span class="pstat-lbl">Libraries</span>
+      </div>
     </div>
 
-    <!-- Tools -->
+    <!-- Search form -->
+    <form id="search-form" action="/search" method="get" style="width:100%;max-width:640px">
+      <div class="search-wrap">
+        <div class="search-input-row">
+          <input type="text" name="title" id="search-input"
+                 placeholder="Search by title… e.g. Naruto, Berserk"
+                 autocomplete="off" spellcheck="false">
+          <button type="submit" class="search-go-btn">SEARCH</button>
+        </div>
+        <div class="typeahead-dropdown" id="typeahead"></div>
+        <input type="hidden" name="type"    id="f-type">
+        <input type="hidden" name="branch"  id="f-branch">
+        <input type="hidden" name="avail"   id="f-avail">
+        <input type="hidden" name="library" id="f-library">
+      </div>
+
+      <!-- Type/branch filters -->
+      <div class="filter-row" style="margin-top:1rem">
+        <select class="filter-select" id="sel-type" onchange="document.getElementById('f-type').value=this.value">
+          <option value="">All types</option>
+          <option>Manga</option>
+          <option value="Light-Novel">Light Novel</option>
+          <option>Novel</option>
+          <option>Manhwa</option>
+          <option>Manhua</option>
+        </select>
+
+        <select class="filter-select" id="sel-branch" onchange="document.getElementById('f-branch').value=this.value">
+          <option value="">All branches</option>
+          <optgroup label="Leon County (LCPL)">
+            <option value="Leroy Collins Leon County Main Public Library">Main — Leroy Collins</option>
+            <option value="Bruce J. Host Northeast Branch Library">Northeast — Bruce</option>
+            <option value="Lake Jackson Branch Library">Lake Jackson</option>
+            <option value="Eastside Branch Library">Eastside</option>
+            <option value="Dr BL Perry Jr Branch Library">Dr BL Perry</option>
+            <option value="Woodville Branch Library">Woodville</option>
+            <option value="Jane G. Sauls Fort Braden Branch Library">Fort Braden</option>
+          </optgroup>
+        </select>
+      </div>
+
+      <!-- Availability pills -->
+      <div class="pill-row" id="avail-pills">
+        <a class="pill-btn pill-all active"  href="#" data-group="avail" data-val="">All statuses</a>
+        <a class="pill-btn pill-avail"       href="#" data-group="avail" data-val="available">🟢 Available</a>
+        <a class="pill-btn pill-out"         href="#" data-group="avail" data-val="out">🔴 Checked out</a>
+        <span class="pill-divider">|</span>
+        <a class="pill-btn pill-all active"  href="#" data-group="library" data-val="">Both libraries</a>
+        <a class="pill-btn pill-lcpl"        href="#" data-group="library" data-val="1">🟢 Leon County</a>
+        <a class="pill-btn pill-broward"     href="#" data-group="library" data-val="2">🟡 Broward</a>
+      </div>
+    </form>
+  </div>
+
+  <!-- ── Stats section ─────────────────────────────────────── -->
+  <div class="shell stats-section" style="padding-bottom:5rem">
     <div class="card">
-        <h2>Tools</h2>
-        <div class="row">
-
-            <!-- Reset DB (regular form — quick, no progress needed) -->
-            <form action="/reset" method="post">
-                <button type="submit" class="danger"
-                    onclick="return confirm('Drop and re-seed all tables?')">Reset DB</button>
-            </form>
-
-            <!-- Update Volumes (regular form) -->
-            <form method="POST">
-                <input type="hidden" name="action" value="update">
-                <input type="text"   name="title"  placeholder="Title"   required style="width:140px">
-                <input type="number" name="volume" placeholder="Volumes" required style="width:80px">
-                <button type="submit">Update Volumes</button>
-            </form>
-
-            <!-- Delete Volume (regular form) -->
-            <form method="POST">
-                <input type="hidden" name="action" value="delete">
-                <input type="text"   name="title"  placeholder="Title"  required style="width:140px">
-                <input type="number" name="volume" placeholder="Volume" required style="width:80px">
-                <button type="submit">Delete Volume</button>
-            </form>
-
-            <!-- Get Authors — AJAX, with progress -->
-            <form id="form-get-authors" onsubmit="return startJob(event, 'get_authors', 'Get Authors')">
-                <input type="hidden" name="action" value="get_authors">
-                <input type="number" name="authors" id="authors-input"
-                       placeholder="# Authors" required style="width:90px">
-                <button type="submit" id="btn-get-authors">Get Authors</button>
-            </form>
-
-            <!-- Get Titles — AJAX, with progress -->
-            <form id="form-get-titles" onsubmit="return startJob(event, 'get_titles', 'Get Titles')">
-                <input type="hidden" name="action" value="get_titles">
-                <input type="number" name="titles" id="titles-input"
-                       placeholder="# Titles" required style="width:90px">
-                <button type="submit" id="btn-get-titles">Get Titles</button>
-            </form>
-
-            <!-- Scrape — AJAX, with progress -->
-            <form id="form-scrape" onsubmit="return startJob(event, 'scrape', 'Scrape')">
-                <input type="hidden" name="action" value="scrape">
-                <input type="number" name="books" id="books-input"
-                       placeholder="# Titles" required style="width:90px">
-                <button type="submit" id="btn-scrape">Scrape</button>
-            </form>
-
-        </div>
-
-        <!-- ── Progress boxes (one per async job) ────────────────── -->
-        <div id="job-get_authors" class="job-box">
-            <div class="job-label">
-                <span class="job-name">Get Authors</span>
-                <span class="job-msg"  id="job-get_authors-msg">starting…</span>
-                <span class="job-pct"  id="job-get_authors-pct">0 %</span>
-            </div>
-            <progress id="job-get_authors-bar" value="0" max="100"></progress>
-        </div>
-
-        <div id="job-get_titles" class="job-box">
-            <div class="job-label">
-                <span class="job-name">Get Titles</span>
-                <span class="job-msg"  id="job-get_titles-msg">starting…</span>
-                <span class="job-pct"  id="job-get_titles-pct">0 %</span>
-            </div>
-            <progress id="job-get_titles-bar" value="0" max="100"></progress>
-        </div>
-
-        <div id="job-scrape" class="job-box">
-            <div class="job-label">
-                <span class="job-name">Scrape</span>
-                <span class="job-msg"  id="job-scrape-msg">starting…</span>
-                <span class="job-pct"  id="job-scrape-pct">0 %</span>
-            </div>
-            <progress id="job-scrape-bar" value="0" max="100"></progress>
-        </div>
-
+      <div class="section-label">About the collection</div>
+      <div id="about-wrap">
+        <p style="font-family:var(--mono);font-size:.78rem;color:var(--text2);line-height:1.8">
+          This tracker covers manga available at both the
+          <strong style="color:var(--green)">Leon County Public Library</strong> (7 branches, full per-volume tracking)
+          and the
+          <strong style="color:var(--amber)">Broward County Library</strong> (title-level availability).
+          Use the library filter above or on the results page to focus on one system.
+        </p>
+        <p style="font-family:var(--mono);font-size:.78rem;color:var(--text2);line-height:1.8;margin-top:.75rem">
+          Full branch breakdown and pipeline controls available on the
+          <a href="/admin" style="color:var(--purple)">Admin Dashboard</a>.
+        </p>
+      </div>
     </div>
 
-    <!-- Stats -->
-    <div class="card">
-        <h2>Branches with more than 10 volumes</h2>
-        <table>
-            <thead>
-                <tr><th>Branch</th><th>Volumes</th></tr>
-            </thead>
-            <tbody>
-                {% for row in manga_per_library %}
-                <tr>
-                    <td>{{ row.BranchName }}</td>
-                    <td>{{ row.VolumeCount }}</td>
-                </tr>
-                {% else %}
-                <tr>
-                    <td colspan="2" style="color:#888">No data — run a scrape or reset the DB.</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+    <div style="padding-top:1rem;display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--border)">
+      <span class="deco-jp">漫画追跡システム</span>
+      <a href="/admin" style="font-family:var(--mono);font-size:.6rem;color:var(--text3);opacity:.4;transition:opacity .2s"
+         onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.4">Admin ↗</a>
     </div>
+  </div>
+</div>
 
-    <script>
-    /* ── Job polling ─────────────────────────────────────────────── */
+<script>
+// ── Stats ──────────────────────────────────────────────────
+async function loadStats() {
+  try {
+    const d = await fetch('/api/stats').then(r => r.json());
+    document.getElementById('stat-volumes').textContent = d.volumes?.toLocaleString() ?? '—';
+    document.getElementById('stat-titles').textContent  = d.titles?.toLocaleString()  ?? '—';
+  } catch {}
+}
+loadStats();
 
-    const POLL_MS   = 1000;   // poll interval while running
-    const DONE_MS   = 3000;   // keep "done" visible before hiding
-    const pollers   = {};     // jobName → intervalId
+// ── Typeahead ──────────────────────────────────────────────
+const input    = document.getElementById('search-input');
+const dropdown = document.getElementById('typeahead');
+let debounce, activeIdx = -1, lastQuery = '';
 
-    function startJob(evt, jobName, label) {
-        evt.preventDefault();
-        const form = evt.target;
-        const btn  = form.querySelector('button[type=submit]');
+function highlight(text, query) {
+  if (!query) return text;
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return text.replace(new RegExp(`(${escaped})`, 'gi'), '<em>$1</em>');
+}
 
-        // Don't start a duplicate while one is already running
-        if (pollers[jobName]) return false;
+async function fetchSuggestions(q) {
+  if (q.length < 2) { closeDropdown(); return; }
+  if (q === lastQuery) return;
+  lastQuery = q;
+  try {
+    const items = await fetch(`/api/suggestions?q=${encodeURIComponent(q)}`).then(r => r.json());
+    renderDropdown(items, q);
+  } catch {}
+}
 
-        btn.disabled = true;
+function renderDropdown(items, q) {
+  activeIdx = -1;
+  if (!items.length) {
+    dropdown.innerHTML = `<div class="ta-empty">No results for "${q}"</div>`;
+    dropdown.classList.add('open'); return;
+  }
+  dropdown.innerHTML = items.map((item, i) => `
+    <div class="ta-item" data-title="${item.title.replace(/"/g, '&quot;')}" data-idx="${i}">
+      <span class="ta-title">${highlight(item.title, q)}</span>
+      <span class="ta-type">${item.type || ''}</span>
+      ${item.score ? `<span class="ta-score">★ ${parseFloat(item.score).toFixed(2)}</span>` : ''}
+    </div>`).join('');
+  dropdown.classList.add('open');
+  dropdown.querySelectorAll('.ta-item').forEach(el => {
+    el.addEventListener('mousedown', e => { e.preventDefault(); navigateTo(el.dataset.title); });
+  });
+}
 
-        // POST via fetch so the page doesn't navigate away
-        const body = new FormData(form);
-        fetch('/', { method: 'POST', body })
-            .then(r => {
-                if (!r.ok) throw new Error(`HTTP ${r.status}`);
-                showJobBox(jobName, 0, 'starting…');
-                pollers[jobName] = setInterval(() => pollJob(jobName, btn), POLL_MS);
-            })
-            .catch(err => {
-                showJobBox(jobName, 0, `error: ${err.message}`, true);
-                btn.disabled = false;
-            });
+function closeDropdown() { dropdown.classList.remove('open'); activeIdx = -1; }
 
-        return false;
-    }
+function navigateTo(title) {
+  const params = new URLSearchParams();
+  params.set('title', title);
+  const typeVal    = document.getElementById('sel-type').value;
+  const branchVal  = document.getElementById('sel-branch').value;
+  const availVal   = document.getElementById('f-avail').value;
+  const libraryVal = document.getElementById('f-library').value;
+  if (typeVal)    params.set('type',    typeVal);
+  if (branchVal)  params.set('branch',  branchVal);
+  if (availVal)   params.set('avail',   availVal);
+  if (libraryVal) params.set('library', libraryVal);
+  window.location.href = '/search?' + params.toString();
+}
 
-    function pollJob(jobName, btn) {
-        fetch(`/api/job/${jobName}`)
-            .then(r => r.json())
-            .then(data => {
-                if (!data || Object.keys(data).length === 0) return; // not started yet
+input.addEventListener('input', () => {
+  clearTimeout(debounce);
+  debounce = setTimeout(() => fetchSuggestions(input.value.trim()), 220);
+});
+input.addEventListener('keydown', e => {
+  const items = dropdown.querySelectorAll('.ta-item');
+  if (!dropdown.classList.contains('open')) return;
+  if (e.key === 'ArrowDown') { e.preventDefault(); activeIdx = Math.min(activeIdx + 1, items.length - 1); items.forEach((el, i) => el.classList.toggle('active', i === activeIdx)); }
+  else if (e.key === 'ArrowUp')  { e.preventDefault(); activeIdx = Math.max(activeIdx - 1, -1); items.forEach((el, i) => el.classList.toggle('active', i === activeIdx)); }
+  else if (e.key === 'Enter' && activeIdx >= 0) { e.preventDefault(); navigateTo(items[activeIdx].dataset.title); }
+  else if (e.key === 'Escape') closeDropdown();
+});
+document.addEventListener('click', e => { if (!e.target.closest('.search-wrap')) closeDropdown(); });
 
-                const pct = data.progress || 0;
-                const msg = data.message  || '';
-                const isError = (msg || '').startsWith('error:');
-
-                showJobBox(jobName, pct, msg, isError);
-
-                if (!data.running) {
-                    clearInterval(pollers[jobName]);
-                    delete pollers[jobName];
-                    btn.disabled = false;
-                    // Auto-hide the box after a short delay
-                    setTimeout(() => hideJobBox(jobName), DONE_MS);
-                }
-            })
-            .catch(() => {}); // silently ignore transient network errors
-    }
-
-    function showJobBox(jobName, pct, msg, isError = false) {
-        const box = document.getElementById(`job-${jobName}`);
-        if (!box) return;
-        box.classList.add('visible');
-        box.classList.toggle('error', isError);
-        box.classList.toggle('done',  !isError && pct >= 100);
-
-        document.getElementById(`job-${jobName}-bar`).value = pct;
-        document.getElementById(`job-${jobName}-pct`).textContent = `${pct} %`;
-
-        // Truncate long messages from the right so the most recent part shows
-        const msgEl = document.getElementById(`job-${jobName}-msg`);
-        msgEl.textContent = msg;
-        msgEl.title = msg; // full text on hover
-    }
-
-    function hideJobBox(jobName) {
-        const box = document.getElementById(`job-${jobName}`);
-        if (box) box.classList.remove('visible', 'done', 'error');
-    }
-
-    /* ── On load: resume any in-progress jobs left from a page reload ── */
-    ['get_authors', 'get_titles', 'scrape'].forEach(jobName => {
-        fetch(`/api/job/${jobName}`)
-            .then(r => r.json())
-            .then(data => {
-                if (data && data.running) {
-                    showJobBox(jobName, data.progress || 0, data.message || '');
-                    const form = document.getElementById(`form-${jobName}`);
-                    const btn  = form && form.querySelector('button[type=submit]');
-                    if (btn) btn.disabled = true;
-                    pollers[jobName] = setInterval(() => pollJob(jobName, btn), POLL_MS);
-                }
-            })
-            .catch(() => {});
-    });
-    </script>
+// ── Pill toggles (availability + library — independent groups) ──────
+document.getElementById('avail-pills').addEventListener('click', e => {
+  const pill = e.target.closest('.pill-btn');
+  if (!pill || !pill.dataset.group) return;
+  e.preventDefault();
+  const group = pill.dataset.group;
+  // Deactivate all in this group
+  document.querySelectorAll(`.pill-btn[data-group="${group}"]`).forEach(p => p.classList.remove('active'));
+  pill.classList.add('active');
+  if (group === 'avail')   document.getElementById('f-avail').value   = pill.dataset.val;
+  if (group === 'library') document.getElementById('f-library').value = pill.dataset.val;
+});
+</script>
 </body>
 </html>

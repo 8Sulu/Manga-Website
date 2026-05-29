@@ -1,26 +1,28 @@
 """
-Library manga scraper - scrapes Leon County Library for manga availability.
+Library manga scraper — no Selenium, no browser.
 
-Usage:
-    python scrapper.py <number_of_titles> [--visible] [--debug]
+Usage (named flags — preferred, matches Broward scraper):
+    python scrapper.py --line 3                scrape line 3
+    python scrapper.py --range 1-50            scrape lines 1 to 50
+    python scrapper.py --indices 1,4,7         scrape specific 1-based indices
+    python scrapper.py --range 1-50 --debug    also write raw JSON to debug/
 
-    --visible   Show the browser window while scraping (default: headless)
-    --debug     Save page HTML to debug/ folder for troubleshooting
+Usage (legacy positional — still supported):
+    python scrapper.py <end>                   scrape titles 1 → end
+    python scrapper.py <start> <end>           scrape titles start → end
 """
+from __future__ import annotations
+
 import re
-import urllib.parse
-import sys
-import csv
+import json
 import time
+import csv
+import sys
 import logging
 from pathlib import Path
 
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+import requests
+from bs4 import BeautifulSoup
 
 sys.path.append(str(Path(__file__).parent.parent))
 from config.settings import DATA_DIR, BRANCH_MAPPING
@@ -28,285 +30,435 @@ from config.settings import DATA_DIR, BRANCH_MAPPING
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 log = logging.getLogger(__name__)
 
-SEARCH_BASE  = "https://lcpl.ent.sirsi.net/client/en_US/lcpl/search/results"
-WAIT_TIMEOUT = 20
-PAGE_SETTLE  = 3   # seconds to let JS render after navigation
+# ── Endpoints ────────────────────────────────────────────────────────────────
+
+CATALOG_BASE     = "https://lcpl.ent.sirsi.net/client/en_US/lcpl"
+SEARCH_BASE      = f"{CATALOG_BASE}/search/results"
+ILSWS_BASE       = "https://lcpl.sirsi.net/lcpl_ilsws/rest/standard/lookupTitleInfo"
+RESULTS_PER_PAGE = 12
+REQUEST_DELAY    = 0.5
+MAX_RETRIES      = 3
 
 
-# ---------------------------------------------------------------------------
-# Driver setup — Linux Chromium only, no Windows fallback
-# ---------------------------------------------------------------------------
+# ── manga.csv → MAL ID map ────────────────────────────────────────────────────
 
-def make_driver(visible: bool = False) -> webdriver.Chrome:
-    opts = Options()
-
-    if not visible:
-        opts.add_argument('--headless=new')
-
-    opts.add_argument('--no-sandbox')
-    opts.add_argument('--disable-dev-shm-usage')
-    opts.add_argument('--disable-gpu')
-    opts.add_argument('--window-size=1920,1080')
-    opts.add_argument('--disable-extensions')
-    opts.add_argument('--blink-settings=imagesEnabled=false')
-
-    linux_bins = [
-        '/usr/bin/chromium-browser',
-        '/usr/bin/chromium',
-        '/usr/bin/google-chrome',
-        '/usr/bin/google-chrome-stable',
-    ]
-
-    found = False
-    for path in linux_bins:
-        if Path(path).exists():
-            opts.binary_location = path
-            log.info(f"Using browser: {path}")
-            found = True
-            break
-
-    if not found:
-        log.error("No Linux Chromium/Chrome binary found. Install with:")
-        log.error("  sudo apt install chromium-browser")
-        sys.exit(1)
-
-    from selenium.webdriver.chrome.service import Service
-
-    # Prefer the Linux chromedriver that matches the system Chromium.
-    # Avoids accidentally picking up a Windows chromedriver from PATH in WSL.
-    linux_drivers = [
-        '/usr/bin/chromedriver',
-        '/usr/lib/chromium-browser/chromedriver',
-        '/usr/lib/chromium/chromedriver',
-        '/snap/bin/chromium.chromedriver',
-    ]
-
-    driver_path = None
-    for p in linux_drivers:
-        if Path(p).exists():
-            driver_path = p
-            log.info(f"Using chromedriver: {p}")
-            break
-
-    if not driver_path:
-        log.error("No Linux chromedriver found. Install with:")
-        log.error("  sudo apt install chromium-chromedriver")
-        sys.exit(1)
-
-    return webdriver.Chrome(service=Service(driver_path), options=opts)
-
-
-# ---------------------------------------------------------------------------
-# Scraping logic
-# ---------------------------------------------------------------------------
-
-def extract_volume(raw_title: str):
+def _load_manga_id_map() -> dict[str, int]:
     """
-    Return (clean_title, volume_int) from a raw library title string.
-    Uses the LAST number found — avoids misreading series numbers as volumes.
-      'Berserk, Vol. 3'                        → ('Berserk', 3)
-      'JoJo Part 7: Steel Ball Run, Vol. 12'   → ('JoJo Part 7: Steel Ball Run', 12)
+    Return {title: mal_id} from manga.csv so the scraper can write the correct
+    MangaID. Forces lowercase keys and strips whitespace for strict matching.
     """
-    nums = re.findall(r'\d+', raw_title)
-    if nums:
-        vol = int(nums[-1])
-        idx = raw_title.rfind(nums[-1])
-        clean = raw_title[:idx].strip(' ,.-')
-        return clean, vol
-    return raw_title.strip(), 0
+    path = DATA_DIR / "manga.csv"
+    if not path.exists():
+        log.error("manga.csv not found — MangaIDs will be missing")
+        return {}
+    result: dict[str, int] = {}
+    with open(path, encoding="utf-8-sig") as f:
+        for row in csv.DictReader(f):
+            # FIX: Ensure everything is stripped cleanly
+            title  = (row.get("Title") or "").strip()
+            mal_id = (row.get("MangaID") or row.get("Id") or "").strip()
+            if title and mal_id:
+                try:
+                    val = int(mal_id)
+                    # Force all keys to lowercase for foolproof lookups
+                    result[title.lower()] = val  
+                except ValueError:
+                    pass
+    return result
 
+# ── HTTP session ──────────────────────────────────────────────────────────────
 
-def wait_for_results(driver, wait):
-    """
-    Wait until either a result or a no-results message appears.
-    Both are valid signals that the page has finished loading.
-    Returns True if results found, False if no-results or timeout.
-    """
-    time.sleep(PAGE_SETTLE)
-
+def make_session() -> requests.Session:
+    s = requests.Session()
+    s.headers.update({
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+    })
+    # Prime session cookies — SirsiDynix requires a session established on the
+    # homepage before search results pages return data correctly.
     try:
-        # Accept either detailLink (results) or searchResultText (no results)
-        wait.until(EC.any_of(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "[id^='detailLink']")),
-            EC.presence_of_element_located((By.ID, "searchResultText")),
-        ))
-    except TimeoutException:
-        log.warning("  Timeout — page never loaded results or no-results message")
-        return False
-
-    # Now check which one appeared
-    try:
-        msg = driver.find_element(By.ID, 'searchResultText').text
-        if 'No results' in msg:
-            log.info("  No results")
-            return False
-    except NoSuchElementException:
-        pass
-
-    return True
+        s.get(CATALOG_BASE, timeout=20)
+        s.headers.update({"Referer": CATALOG_BASE})
+        log.info("Session primed")
+    except Exception as e:
+        log.warning(f"Session prime failed (continuing): {e}")
+    return s
 
 
-def scrape_page(driver, title_number: int, availability_id: int):
-    """Extract all book entries visible on the current page. Returns list of dicts."""
-    links = driver.find_elements(By.CSS_SELECTOR, "[id^='detailLink']")
+# ── Step 1: search page → catalog keys ───────────────────────────────────────
+
+def _extract_keys_from_href(href: str, keys: list, seen: set) -> None:
+    for pattern in (
+        r"SD_ILS[:\u003a](\d+)",
+        r"SD_ILS%3[Aa](\d+)",
+        r"SD_ILS\$003[Aa](\d+)",
+        r"SD_ILS:(\d+)",
+    ):
+        for m in re.finditer(pattern, href, re.IGNORECASE):
+            k = int(m.group(1))
+            if k not in seen:
+                seen.add(k)
+                keys.append(k)
+
+
+def fetch_catalog_keys(session: requests.Session, title: str, author: str,
+                       page: int = 0) -> list:
+    params: dict = {
+        "qu": ["", f"TITLE={title}", f"AUTHOR={author}"],
+        "te": "ILS",
+        "h":  "1",
+        "lm": "BOOKS",
+    }
+    if page > 0:
+        params["rw"] = page * RESULTS_PER_PAGE
+
+    for attempt in range(MAX_RETRIES):
+        try:
+            r = session.get(SEARCH_BASE, params=params, timeout=15)
+            r.raise_for_status()
+            break
+        except requests.RequestException as e:
+            log.warning(f"  Search attempt {attempt+1} failed: {e}")
+            if attempt == MAX_RETRIES - 1:
+                return []
+            time.sleep(2 ** attempt)
+    else:
+        return []
+
+    soup = BeautifulSoup(r.text, "html.parser")
+    result_text = soup.find(id="searchResultText")
+    if result_text and "No results" in result_text.get_text():
+        return []
+
+    keys: list = []
+    seen: set  = set()
+
+    # Primary: links with id starting "detailLink"
+    for a in soup.find_all("a", id=re.compile(r"^detailLink")):
+        _extract_keys_from_href(a.get("href", ""), keys, seen)
+
+    # Fallback: any link whose href contains SD_ILS
+    if not keys:
+        for a in soup.find_all("a", href=True):
+            _extract_keys_from_href(a["href"], keys, seen)
+
+    return keys
+
+
+# ── Step 2: ILSWS API ─────────────────────────────────────────────────────────
+
+def _strip_jsonp(text: str) -> str:
+    text = text.strip()
+    m = re.match(r'^[^(]*\((.*)\)\s*;?\s*$', text, re.DOTALL)
+    return m.group(1) if m else text
+
+
+def fetch_title_info(session: requests.Session, catalog_key: int,
+                     debug_dir=None) -> dict:
+    params = {
+        "clientID":        "DS_CLIENT",
+        "titleID":         catalog_key,
+        "includeItemInfo": "true",
+        "includeOPACInfo": "false",
+        "json":            "true",
+        "callback":        "lcpl_cb",
+        "_":               int(time.time() * 1000),
+    }
+    headers = {
+        "Referer":          SEARCH_BASE,
+        "Accept":           "*/*",
+        "X-Requested-With": "XMLHttpRequest",
+    }
+    for attempt in range(MAX_RETRIES):
+        try:
+            r = session.get(ILSWS_BASE, params=params, headers=headers, timeout=15)
+            r.raise_for_status()
+            raw = _strip_jsonp(r.text)
+            if debug_dir:
+                Path(debug_dir).mkdir(parents=True, exist_ok=True)
+                (Path(debug_dir) / f"ilsws_{catalog_key}.json").write_text(raw, encoding="utf-8")
+            return json.loads(raw)
+        except (requests.RequestException, json.JSONDecodeError) as e:
+            log.warning(f"  ILSWS attempt {attempt+1} for key {catalog_key}: {e}")
+            if attempt == MAX_RETRIES - 1:
+                return {}
+            time.sleep(2 ** attempt)
+    return {}
+
+
+# ── Step 3: parse response ────────────────────────────────────────────────────
+
+def extract_volume_from_callnumber(call_number: str) -> int:
+    m = re.search(r'\bV(?:OL)?[.\s]+(\d+)', call_number, re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+    nums = re.findall(r'\d+', call_number)
+    return int(nums[-1]) if nums else 0
+
+
+def item_status(current_loc: str, due_date) -> str:
+    loc = (current_loc or "").upper()
+    if loc in ("CHECKEDOUT", "CHECKED-OUT", "OUT") or due_date:
+        return "Checked Out"
+    if "HOLD" in loc:
+        return "On Hold"
+    if "TRANSIT" in loc:
+        return "In Transit"
+    return "Graphic Novel - Young Adult Fiction"
+
+
+def parse_title_info(data: dict, manga_id: int, availability_id: int) -> tuple:
     books = []
+    valid_branch_keys = {k.upper() for k in BRANCH_MAPPING}
 
-    for elem in links:
-        elem_id = elem.get_attribute('id') or ''
-        if not elem_id.startswith('detailLink'):
-            continue
-        try:
-            book_num = int(elem_id.replace('detailLink', ''))
-        except ValueError:
-            continue
+    for title_entry in data.get("TitleInfo", []):
+        for call in title_entry.get("CallInfo", []):
+            library_id = (call.get("libraryID") or "").strip().upper()
+            if library_id not in valid_branch_keys:
+                log.debug(f"  Unknown libraryID {library_id!r} — skipped")
+                continue
 
-        raw_title = elem.text.strip()
-        if not raw_title:
-            continue
+            call_number = call.get("callNumber") or ""
+            volume      = extract_volume_from_callnumber(call_number)
 
-        clean_title, vol = extract_volume(raw_title)
+            statuses = [
+                item_status(item.get("currentLocationID"), item.get("dueDate"))
+                for item in call.get("ItemInfo", [])
+            ] or ["Graphic Novel - Young Adult Fiction"]
 
-        branch_status = []
-        try:
-            table = driver.find_element(By.ID, f'detailItemTableCust{book_num}')
-            for row in table.find_elements(By.TAG_NAME, 'tr'):
-                cells = row.find_elements(By.TAG_NAME, 'td')
-                if cells:
-                    branch_status.append((cells[0].text.strip(), cells[-1].text.strip()))
-        except NoSuchElementException:
-            pass
+            # If any copy is on shelf, report the branch as available
+            final_status = next(
+                (s for s in statuses if "Checked Out" not in s),
+                "Checked Out",
+            )
 
-        books.append({
-            'title':           clean_title,
-            'manga_id':        title_number,
-            'volume':          vol,
-            'branch_status':   branch_status,
-            'availability_id': availability_id,
-        })
-        availability_id += 1
+            books.append({
+                "manga_id":        manga_id,
+                "volume":          volume,
+                "branch_status":   [(library_id, final_status)],
+                "availability_id": availability_id,
+            })
+            availability_id += 1
 
     return books, availability_id
 
 
-def scrape(n: int, visible: bool = False, debug: bool = False):
-    titles_file  = DATA_DIR / 'titles.txt'
-    authors_file = DATA_DIR / 'authors.txt'
+# ── Orchestration ─────────────────────────────────────────────────────────────
 
-    with open(titles_file, encoding='utf-8') as f:
-        titles = [l.strip() for l in f if l.strip()]
-    with open(authors_file, encoding='utf-8') as f:
-        authors = [l.strip() for l in f if l.strip()]
+def _read_positional(path: Path) -> list[str]:
+    """
+    Read a positional flat file preserving blank lines.
+    Returns list where index i = line i (0-based), '' for blank/gap slots.
+    """
+    if not path.exists():
+        return []
+    return [line.rstrip('\n') for line in path.open(encoding='utf-8')]
 
-    # Only scrape pairs where we actually have an author
-    pairs = [(t, a) for t, a in zip(titles, authors) if a.strip()][:n]
-    log.info(f"Scraping {len(pairs)} titles (visible={visible})")
 
-    driver = make_driver(visible=visible)
-    wait   = WebDriverWait(driver, WAIT_TIMEOUT)
-    all_books      = []
+def scrape(start: int = 1, end: int = 1,
+           indices: list[int] | None = None,
+           debug: bool = False) -> list:
+    """
+    Scrape library availability.
+
+    Titles and authors are read positionally — blank lines are gap slots from
+    out-of-order get_manga runs and are silently skipped.  Indices are always
+    1-based line numbers in the positional files.
+    """
+    titles_path  = DATA_DIR / "titles.txt"
+    authors_path = DATA_DIR / "authors.txt"
+    debug_dir    = DATA_DIR.parent / "debug" if debug else None
+
+    # Positional read — preserves blank gap slots
+    titles  = _read_positional(titles_path)
+    authors = _read_positional(authors_path)
+
+    manga_id_map = _load_manga_id_map()
+
+    def _resolve(pos: int, label: str):
+        """Return (title, author, mal_id) for 0-based pos, or None to skip."""
+        if pos < 0 or pos >= len(titles):
+            log.warning(f"  {label} out of range (file has {len(titles)} lines) — skipping")
+            return None
+        t = titles[pos].strip()
+        if not t:
+            log.debug(f"  {label} is a gap slot (blank line) — skipping")
+            return None
+        a = authors[pos].strip() if pos < len(authors) else ""
+        if not a:
+            log.warning(f"  {label} '{t}' has no author — skipping")
+            return None
+        mal_id = manga_id_map.get(t.lower())
+        if mal_id is None:
+            log.warning(f"  {label} '{t}' not found in manga.csv — skipping")
+            return None
+        return t, a, mal_id
+
+    if indices is not None:
+        pairs = []
+        for i in indices:
+            result = _resolve(i - 1, f"Index {i}")
+            if result:
+                pairs.append(result)
+    else:
+        start = max(1, start)
+        end   = min(end, len(titles))
+        pairs = []
+        for i in range(start - 1, end):
+            result = _resolve(i, f"Line {i+1}")
+            if result:
+                pairs.append(result)
+
+    log.info(f"Scraping {len(pairs)} titles via ILSWS REST API")
+
+    session         = make_session()
+    all_books: list = []
     availability_id = 1
 
-    try:
-        for title_number, (title, author) in enumerate(pairs, start=1):
-            title_enc  = urllib.parse.quote(title)
-            author_enc = urllib.parse.quote(author)
-            url = (
-                f"{SEARCH_BASE}"
-                f"?qu=&qu=TITLE%3D{title_enc}+&qu=AUTHOR%3D{author_enc}+"
-                f"&te=ILS&h=1"
-            )
-            log.info(f"[{title_number}/{len(pairs)}] {title!r} by {author!r}")
-            driver.get(url)
+    for progress, (title, author, manga_id) in enumerate(pairs, start=1):
+        log.info(f"[{progress}/{len(pairs)}] (ID {manga_id}) {title!r} by {author!r}")
+        print(f"[{progress}/{len(pairs)}] {title}", flush=True)
 
-            # SirsiDynix uses &rw=N to offset results (12 per page).
-            # We navigate directly to each page URL instead of clicking the
-            # AJAX next button, which triggers Cloudflare security checks.
-            RESULTS_PER_PAGE = 12
-            page = 0
-            while True:
-                rw = page * RESULTS_PER_PAGE
-                page_url = url + (f"&rw={rw}" if rw > 0 else "")
-                if page > 0:
-                    log.info(f"  Navigating to page {page} (rw={rw})")
-                    driver.get(page_url)
+        catalog_keys: list = []
+        seen_keys:    set  = set()
+        page = 0
+        while True:
+            keys = fetch_catalog_keys(session, title, author, page)
+            log.info(f"  Search page {page}: {len(keys)} catalog keys")
+            for k in keys:
+                if k not in seen_keys:
+                    seen_keys.add(k)
+                    catalog_keys.append(k)
+            if len(keys) < RESULTS_PER_PAGE:
+                break
+            page += 1
+            time.sleep(REQUEST_DELAY)
 
-                if not wait_for_results(driver, wait):
-                    break
+        if not catalog_keys:
+            log.warning("  No catalog keys found — skipping")
+            continue
 
-                if debug:
-                    safe      = re.sub(r'[^\w]', '_', title)
-                    debug_dir = DATA_DIR.parent / 'debug'
-                    debug_dir.mkdir(exist_ok=True)
-                    (debug_dir / f"{safe}_p{page}.html").write_text(
-                        driver.page_source, encoding='utf-8'
-                    )
+        log.info(f"  {len(catalog_keys)} unique catalog key(s)")
 
-                books, availability_id = scrape_page(driver, title_number, availability_id)
-                all_books.extend(books)
-                log.info(f"  Page {page} (rw={rw}): {len(books)} volumes")
+        for key in catalog_keys:
+            time.sleep(REQUEST_DELAY)
+            data = fetch_title_info(session, key, debug_dir)
+            if not data:
+                log.warning(f"  No data for key {key}")
+                continue
 
-                if not books:
-                    break
+            books, availability_id = parse_title_info(data, manga_id, availability_id)
+            all_books.extend(books)
 
-                # If we got fewer than a full page, there are no more pages
-                if len(books) < RESULTS_PER_PAGE:
-                    break
+            if books:
+                vols     = [b["volume"] for b in books]
+                branches = [b["branch_status"][0][0] for b in books]
+                log.info(f"  Key {key}: vol(s) {vols} @ {branches}")
 
-                page += 1
-
-    finally:
-        driver.quit()
-
+    log.info(f"Scraping complete — {len(all_books)} volume entries")
     return all_books
 
 
-# ---------------------------------------------------------------------------
-# CSV output
-# ---------------------------------------------------------------------------
+# ── CSV output ────────────────────────────────────────────────────────────────
 
-def write_csvs(books: list):
+def write_csvs(books: list) -> None:
     branch_id_map = {k.upper(): v for k, v in BRANCH_MAPPING.items()}
 
-    avail_path = DATA_DIR / 'availability.csv'
-    bas_path   = DATA_DIR / 'branch_availability_status.csv'
+    avail_path = DATA_DIR / "availability.csv"
+    bas_path   = DATA_DIR / "branch_availability_status.csv"
 
-    with open(avail_path, 'w', newline='', encoding='utf-8') as f:
-        w = csv.DictWriter(f, fieldnames=['MangaID', 'Volume'])
+    with open(avail_path, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=["AvailabilityID", "MangaID", "Volume"])
         w.writeheader()
         for b in books:
-            w.writerow({'MangaID': b['manga_id'], 'Volume': b['volume']})
+            w.writerow({
+                "AvailabilityID": b["availability_id"],
+                "MangaID":        b["manga_id"],
+                "Volume":         b["volume"],
+            })
 
-    with open(bas_path, 'w', newline='', encoding='utf-8') as f:
-        w = csv.DictWriter(f, fieldnames=['AvailabilityID', 'BranchID', 'Status'])
+    with open(bas_path, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=["AvailabilityID", "BranchID", "Status"])
         w.writeheader()
         for b in books:
-            for branch, status in b['branch_status']:
+            for branch, status in b["branch_status"]:
                 branch_id = branch_id_map.get(branch.upper(), -1)
                 if branch_id == -1:
-                    log.warning(f"  Unknown branch (skipped): {branch!r}")
+                    log.warning(f"  Unknown branch key (skipped): {branch!r}")
                     continue
                 w.writerow({
-                    'AvailabilityID': b['availability_id'],
-                    'BranchID':       branch_id,
-                    'Status':         status,
+                    "AvailabilityID": b["availability_id"],
+                    "BranchID":       branch_id,
+                    "Status":         status,
                 })
 
-    log.info(f"Wrote {len(books)} volumes → {avail_path.name}, {bas_path.name}")
+    log.info(f"Wrote {len(books)} availability rows → {avail_path.name}, {bas_path.name}")
 
 
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
+# ── Entry point ───────────────────────────────────────────────────────────────
 
-if __name__ == '__main__':
-    if len(sys.argv) < 2:
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="LCPL manga scraper",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+    parser.add_argument("positional", nargs="*",
+                        help="Legacy: <end>  OR  <start> <end>")
+    parser.add_argument("--debug",   action="store_true",
+                        help="Write raw ILSWS JSON to debug/ folder")
+
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--line",    type=int,
+                       help="Scrape a single 1-based line number (e.g. --line 3)")
+    group.add_argument("--range",   type=str,
+                       help="Scrape a range of lines (e.g. --range 1-50)")
+    group.add_argument("--indices", type=lambda s: [int(x) for x in s.split(",")],
+                       metavar="N,N,…",
+                       help="Scrape specific comma-separated 1-based indices (e.g. --indices 1,4,7)")
+
+    args = parser.parse_args()
+
+    if args.indices:
+        books = scrape(indices=args.indices, debug=args.debug)
+
+    elif args.line:
+        books = scrape(indices=[args.line], debug=args.debug)
+
+    elif args.range:
+        try:
+            parts = args.range.split("-")
+            start = max(1, int(parts[0]))
+            end   = int(parts[1])
+        except (ValueError, IndexError):
+            print("Invalid --range format. Use START-END (e.g. --range 1-50)")
+            sys.exit(1)
+        books = scrape(start=start, end=end, debug=args.debug)
+
+    elif args.positional:
+        # Legacy positional interface — still used by backend.py subprocess calls
+        pos = args.positional
+        try:
+            if len(pos) == 1:
+                books = scrape(start=1, end=int(pos[0]), debug=args.debug)
+            elif len(pos) == 2:
+                books = scrape(start=int(pos[0]), end=int(pos[1]), debug=args.debug)
+            else:
+                print(__doc__)
+                sys.exit(1)
+        except ValueError:
+            print(__doc__)
+            sys.exit(1)
+
+    else:
         print(__doc__)
         sys.exit(1)
 
-    n       = int(sys.argv[1])
-    visible = '--visible' in sys.argv
-    debug   = '--debug' in sys.argv
-
-    books = scrape(n, visible=visible, debug=debug)
-    log.info(f"Scraping complete — {len(books)} volumes found")
     write_csvs(books)

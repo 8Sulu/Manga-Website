@@ -1,0 +1,20 @@
+[
+  {
+    "start": 0,
+    "end": 0,
+    "scraped_at": "2026-05-28T04:20:33.263414+00:00",
+    "message": "Updated MangaIDs 13\u20131706: deleted 0 old, inserted 354 avail + 354 branch rows"
+  },
+  {
+    "start": 0,
+    "end": 0,
+    "scraped_at": "2026-05-29T01:36:09.427239+00:00",
+    "message": "Updated MangaIDs 1\u2013152024: deleted 0 old, inserted 1635 avail + 1635 branch rows"
+  },
+  {
+    "start": 0,
+    "end": 0,
+    "scraped_at": "2026-05-29T05:39:31.676407+00:00",
+    "message": "Updated MangaIDs 13\u20131706: deleted 0 old, inserted 355 avail + 355 branch rows"
+  }
+]

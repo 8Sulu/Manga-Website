@@ -1,0 +1,35 @@
+# /etc/nginx/sites-available/manga
+# Symlink to enable: sudo ln -s /etc/nginx/sites-available/manga /etc/nginx/sites-enabled/
+
+server {
+    listen 80;
+    server_name manga-website.duckdns.org;          # catches any hostname / bare IP — change to your
+                            # domain name if you have one (e.g. manga.home)
+
+    # Serve static files directly — no Python involved
+    location /static/ {
+        alias /opt/manga/web/static/;
+        expires 1d;
+        add_header Cache-Control "public";
+    }
+
+    # Everything else goes to gunicorn
+    location / {
+        proxy_pass         http://unix:/run/manga/gunicorn.sock;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Allow the browser to poll /api/job/* without timing out
+        proxy_read_timeout 60s;
+
+        # Don't buffer — lets the job-poll responses arrive immediately
+        proxy_buffering off;
+    }
+
+    # Block access to raw data files just in case
+    location /data/ { deny all; }
+}

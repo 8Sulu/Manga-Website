@@ -1,253 +1,325 @@
-import requests
-import urllib.parse
-import time
-import logging
-from typing import Dict, Optional
+"""
+services/api_service.py
+
+All MAL API interactions:
+  - process_manga_batch(offset)  — fetch 500 ranked titles, enrich with details, append to manga.csv
+  - get_authors_from_api()       — REMOVED: authors now come directly from manga.csv via MAL
+
+The manga.csv schema is now:
+    MangaID, Title, Type, Volumes, Members, Score, Author
+where MangaID is the MAL manga ID (integer primary key).
+"""
+import os, requests, time, json, logging, csv
 from pathlib import Path
+from typing import Dict
+
+# ── .env — always resolve from this file's location ──────────────────────────
+_BASE_DIR = Path(__file__).parent.parent.resolve()
+try:
+    from dotenv import load_dotenv
+    load_dotenv(_BASE_DIR / '.env', override=False)
+except ImportError:
+    _env_file = _BASE_DIR / '.env'
+    if _env_file.exists():
+        for _line in _env_file.read_text().splitlines():
+            _line = _line.strip()
+            if _line and not _line.startswith('#') and '=' in _line:
+                _k, _v = _line.split('=', 1)
+                if _k.strip() not in os.environ:
+                    os.environ[_k.strip()] = _v.strip().strip('"\'')
 
 from config.settings import DATA_DIR, REQUEST_TIMEOUT, MAX_RETRIES
+from services.mal_client import authenticated_request
 
 logger = logging.getLogger(__name__)
 
-KNOWN_AUTHORS = {
-    "berserk":                                                    "Miura",
-    "jojo no kimyou na bouken part 7: steel ball run":            "Araki",
-    "vagabond":                                                   "Inoue",
-    "one piece":                                                  "Oda",
-    "monster":                                                    "Urasawa",
-    "slam dunk":                                                  "Inoue",
-    "vinland saga":                                               "Yukimura",
-    "fullmetal alchemist":                                        "Arakawa",
-    "grand blue":                                                 "Inoue",
-    "oyasumi punpun":                                             "Asano",
-    "kingdom":                                                    "Hara",
-    "houseki no kuni":                                            "Ichikawa",
-    "20th century boys":                                          "Urasawa",
-    "ashita no joe":                                              "Chiba",
-    "real":                                                       "Inoue",
-    "kaguya-sama wa kokurasetai: tensai-tachi no renai zunousen": "Akasaka",
-    "gto":                                                        "Fujisawa",
-    "3-gatsu no lion":                                            "Umino",
-    "yotsuba to!":                                                "Azuma",
-    "koe no katachi":                                             "Oima",
-    "haikyuu!!":                                                  "Furudate",
-    "akatsuki no yona":                                           "Kusanagi",
-    "kaze no tani no nausicaa":                                   "Miyazaki",
-    "mushishi":                                                   "Urushibara",
-    "nana":                                                       "Yazawa",
-    "made in abyss":                                              "Tsukushi",
-    "chainsaw man":                                               "Fujimoto",
-    "one punch-man":                                              "Murata",
-    "hunter x hunter":                                           "Togashi",
-    "hajime no ippo":                                             "Morikawa",
-    "kokou no hito":                                              "Sakamoto",
-    "sayonara eri":                                               "Fujimoto",
-    "death note":                                                 "Obata",
-    "attack on titan":                                            "Isayama",
-    "naruto":                                                     "Kishimoto",
-    "dragon ball":                                                "Toriyama",
-    "bleach":                                                     "Kubo",
-    "tokyo ghoul":                                                "Ishida",
-    "demon slayer":                                               "Gotouge",
-    "my hero academia":                                           "Horikoshi",
-    "spy x family":                                               "Endo",
-    "jujutsu kaisen":                                             "Akutami",
-    "blue period":                                                "Yamaguchi",
-    "dungeon meshi":                                              "Kui",
-    "solanin":                                                    "Asano",
-    "punpun":                                                     "Asano",
-    "i am a hero":                                                "Hanazawa",
-}
+# ── Stop flag ─────────────────────────────────────────────────────────────────
+_stop_requested = False
+def request_stop(): global _stop_requested; _stop_requested = True
+def clear_stop():   global _stop_requested; _stop_requested = False
+def is_stop_requested(): return _stop_requested
 
-class GoogleBooksAPI:
-    BASE_URL = "https://www.googleapis.com/books/v1/volumes"
 
-    def __init__(self):
-        from config.settings import GOOGLE_BOOKS_API_KEY
-        self.api_key = GOOGLE_BOOKS_API_KEY
-        if not self.api_key:
-            logger.warning("No GOOGLE_BOOKS_API_KEY — requests will be heavily rate-limited")
-        self.session = requests.Session()
-        self.session.headers.update({'User-Agent': 'Manga-Website/1.0'})
+# ── manga.csv field names ─────────────────────────────────────────────────────
+MANGA_CSV_FIELDS = ['MangaID', 'Title', 'Type', 'Volumes', 'Members', 'Score', 'Author', 'CoverMedium', 'CoverLarge']
 
-    def browse_link(self, title: str) -> str:
-        """Inspectable URL — includes key so you see the same results the code sees."""
-        q = urllib.parse.quote(f"{title} manga")
-        url = f"{self.BASE_URL}?q={q}&printType=books&maxResults=5"
-        if self.api_key:
-            url += f"&key={self.api_key}"
-        return url
 
-    def get_books_data(self, title: str) -> Dict:
-        params = {
-            "q":         f"{title} manga",
-            "printType": "books",
-            "maxResults": 10,
-        }
-        if self.api_key:
-            params["key"] = self.api_key
+# ── Detail fetcher ────────────────────────────────────────────────────────────
 
-        for attempt in range(MAX_RETRIES):
+def _fetch_manga_details(mal_id: str) -> dict:
+    """
+    Fetch type, volumes, members, score, author, and English title for one MAL ID.
+    Returns a dict containing English Title (if available) along with metadata fields.
+    """
+    # FIX: Correctly query alternative_titles as a core field
+    url = (
+        f"https://api.myanimelist.net/v2/manga/{mal_id}"
+        f"?fields=media_type,num_volumes,mean,num_list_users,authors{{first_name,last_name}},alternative_titles,main_picture"
+    )
+
+    for attempt in range(MAX_RETRIES):
+        try:
+            resp = authenticated_request(url, timeout=REQUEST_TIMEOUT)
+
+            if resp.status_code == 200:
+                data        = resp.json()
+                media_type  = data.get('media_type', 'Unknown').replace('_', ' ').title()
+                num_volumes = data.get('num_volumes') or None   # 0 → None → "NULL"
+                
+                # FIX: Handle object extraction and fix 'englisth_title' typo
+                english_title = None
+                alt_titles_dict = data.get('alternative_titles') or {}
+                if isinstance(alt_titles_dict, dict):
+                    english_title = (alt_titles_dict.get('en') or '').strip()
+
+                # Extract primary author surname
+                author = 'NULL'
+                authors_list = data.get('authors', [])
+                if authors_list:
+                    node       = authors_list[0].get('node', {})
+                    last_name  = (node.get('last_name')  or '').strip()
+                    first_name = (node.get('first_name') or '').strip()
+                    if last_name:
+                        author = last_name
+                    elif first_name:
+                        author = first_name.split()[-1]
+
+                main_pic     = data.get('main_picture') or {}
+                cover_medium = main_pic.get('medium') or 'NULL'
+                cover_large  = main_pic.get('large')  or 'NULL'
+
+                return {
+                    'EnglishTitle': english_title or None, # temporary container for title logic handling
+                    'Type':        media_type,
+                    'Volumes':     num_volumes or 'NULL',
+                    'Members':     data.get('num_list_users') or 'NULL',
+                    'Score':       data.get('mean')           or 'NULL',
+                    'Author':      author,
+                    'CoverMedium': cover_medium,
+                    'CoverLarge':  cover_large,
+                }
+
+            elif resp.status_code in (429, 503):
+                wait = min(60, 5 * (2 ** attempt))
+                logger.warning(f"  HTTP {resp.status_code} for ID {mal_id} — retrying in {wait}s")
+                time.sleep(wait)
+            else:
+                logger.error(f"  HTTP {resp.status_code} for ID {mal_id}: {resp.text[:200]}")
+                break
+
+        except requests.exceptions.RequestException as e:
+            wait = min(60, 5 * (2 ** attempt))
+            logger.warning(f"  Network error ({type(e).__name__}) for ID {mal_id} — retrying in {wait}s")
+            print(f"  [!] Network timeout/error fetching details for ID {mal_id}, retrying...", flush=True)
+            time.sleep(wait)
+
+    return {'EnglishTitle': None, 'Type': 'NULL', 'Volumes': 'NULL', 'Members': 'NULL', 'Score': 'NULL', 'Author': 'NULL', 'CoverMedium': 'NULL', 'CoverLarge': 'NULL'}
+
+
+# ── Batch processor ───────────────────────────────────────────────────────────
+
+def _upsert_manga_to_db(rows: list[dict]) -> str:
+    """
+    Insert new manga rows into the DB, skipping any MangaID already present.
+    Returns a human-readable summary string.
+    """
+    if not rows:
+        return "no new rows to insert"
+    try:
+        # Import here to avoid circular deps when api_service is used standalone
+        import mysql.connector
+        from config.settings import DB_CONFIG
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+        inserted = skipped = 0
+        for row in rows:
             try:
-                response = self.session.get(self.BASE_URL, params=params, timeout=REQUEST_TIMEOUT)
-
-                if response.status_code == 200:
-                    data = response.json()
-                    logger.info(f"  API: {len(data.get('items', []))} items")
-                    return data
-
-                if response.status_code in (429, 503):
-                    wait = 10 * (attempt + 1)
-                    logger.warning(f"  HTTP {response.status_code} — retrying in {wait}s")
-                    time.sleep(wait)
-                    continue
-
-                logger.error(f"  HTTP {response.status_code}: {response.text[:300]}")
-                return {}
-
-            except Exception as e:
-                logger.error(f"  Request error: {e}")
-                if attempt < MAX_RETRIES - 1:
-                    time.sleep(3)
-
-        return {}
-
-    def find_valid_author(self, data: Dict, valid_names: set) -> Optional[str]:
-        for item in data.get("items", []):
-            for author in item.get("volumeInfo", {}).get("authors", []):
-                words = [w.strip('.,').lower() for w in author.split()]
-                if any(w in valid_names for w in words):
-                    return author
-        return None
-
-    def list_authors_found(self, data: Dict) -> list:
-        seen = []
-        for item in data.get("items", []):
-            for author in item.get("volumeInfo", {}).get("authors", []):
-                if author not in seen:
-                    seen.append(author)
-        return seen
+                cursor.execute(
+                    "INSERT INTO manga (MangaID, Title, Type, Volumes, Members, Score, Author, CoverMedium, CoverLarge) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    (
+                        int(row['MangaID']),
+                        row['Title'],
+                        None if row['Type']    in ('NULL', '', None) else row['Type'],
+                        None if row['Volumes'] in ('NULL', '', None) else row['Volumes'],
+                        None if row['Members'] in ('NULL', '', None) else row['Members'],
+                        None if row['Score']   in ('NULL', '', None) else row['Score'],
+                        None if row['Author']  in ('NULL', '', None) else row['Author'],
+                        None if row.get('CoverMedium') in ('NULL', '', None) else row.get('CoverMedium'),
+                        None if row.get('CoverLarge')  in ('NULL', '', None) else row.get('CoverLarge'),
+                    )
+                )
+                inserted += 1
+            except mysql.connector.IntegrityError:
+                skipped += 1  # duplicate PK — already exists
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return f"DB: inserted {inserted} new manga rows, skipped {skipped} duplicates"
+    except Exception as e:
+        logger.warning(f"DB upsert failed (CSV still updated): {e}")
+        return f"DB upsert failed: {e}"
 
 
-def _load_lines(path: Path) -> list:
+def _read_positional_lines(path: Path) -> list[str]:
+    """
+    Read a positional text file (titles.txt / authors.txt) preserving blank-line
+    slots.  Returns a list where index i = line i (0-based), blank for gaps.
+    """
     if not path.exists():
         return []
-    with open(path, "r", encoding="utf-8") as f:
-        return [line.rstrip("\n") for line in f]
+    return [line.rstrip('\n') for line in path.open(encoding='utf-8')]
 
 
-def _save_lines(path: Path, lines: list) -> None:
-    with open(path, "w", encoding="utf-8") as f:
+def _write_positional_slot(path: Path, slot_index: int, value: str) -> None:
+    """
+    Write `value` at 0-based `slot_index` in a positional flat file.
+    Pads with blank lines if the file is shorter than slot_index.
+    If the slot already has a non-blank value, it is left untouched (skip).
+    """
+    lines = _read_positional_lines(path)
+    # Extend with blank lines up to slot_index
+    while len(lines) <= slot_index:
+        lines.append('')
+    if lines[slot_index].strip():
+        return  # already filled — don't overwrite
+    lines[slot_index] = value
+    with path.open('w', encoding='utf-8') as f:
         for line in lines:
-            f.write(line + "\n")
+            f.write(line + '\n')
 
 
-def get_authors_from_api(num_authors: int) -> bool:
+def _ensure_positional_gap(path: Path, up_to_index: int) -> None:
     """
-    Resolve author surnames for the first num_authors titles in titles.txt.
-
-    Resolution order per title:
-      1. Already in authors.txt → skip (no API call)
-      2. Title found in KNOWN_AUTHORS table → use directly (no API call)
-      3. Google Books API → query as '<title> manga' with key auth
-
-    authors.txt is always kept the same length as titles.txt.
-    titles.txt is never modified.
-    Flushes to disk after every title.
-
-    Every title logs a [N/M] line so the backend progress tracker can parse it.
+    Ensure the file has at least (up_to_index + 1) lines, padding with blanks.
+    Used to reserve slots for a gap (e.g. offset 1000 run before offset 500).
     """
-    titles_path  = DATA_DIR / "titles.txt"
-    authors_path = DATA_DIR / "authors.txt"
-    valid_path   = DATA_DIR / "valid_authors.txt"
+    lines = _read_positional_lines(path)
+    if len(lines) >= up_to_index + 1:
+        return
+    while len(lines) <= up_to_index:
+        lines.append('')
+    with path.open('w', encoding='utf-8') as f:
+        for line in lines:
+            f.write(line + '\n')
 
-    if not titles_path.exists():
-        logger.error("titles.txt not found"); return False
-    if not valid_path.exists():
-        logger.error("valid_authors.txt not found"); return False
 
-    with open(valid_path, "r", encoding="utf-8") as f:
-        valid_names = {line.strip().lower() for line in f if line.strip()}
+def process_manga_batch(offset: int) -> bool:
+    """
+    Fetch up to 500 ranked titles from MAL starting at <offset>.
 
-    all_titles = _load_lines(titles_path)
-    if not all_titles:
-        logger.error("titles.txt is empty"); return False
+    Titles/authors/manga.csv are written positionally so that:
+      - Line (offset + i) in titles.txt = rank (offset + i + 1) title
+      - Running offset 0 then offset 1000 leaves lines 500-999 blank
+      - Going back with offset 500 fills those blank slots without disrupting others
+    After fetching, new rows are also upserted directly into the manga DB table.
+    """
+    clear_stop()
 
-    # Keep authors list exactly as long as titles list
-    authors = _load_lines(authors_path)
-    if len(authors) != len(all_titles):
-        authors = (authors + [""] * len(all_titles))[:len(all_titles)]
-        logger.info(f"Resynced authors.txt to {len(authors)} entries")
-        _save_lines(authors_path, authors)
+    ranking_url = (
+        f"https://api.myanimelist.net/v2/manga/ranking"
+        f"?ranking_type=all&limit=500&offset={offset}"
+    )
+    logger.info(f"Fetching rankings at offset {offset}…")
+    print(f"Fetching rankings at offset {offset}…", flush=True)
 
-    books_api   = GoogleBooksAPI()
-    found_local = 0
-    found_api   = 0
-    failed      = 0
+    resp = authenticated_request(ranking_url, timeout=REQUEST_TIMEOUT)
+    if resp.status_code != 200:
+        logger.error(f"Failed to fetch rankings: HTTP {resp.status_code}")
+        print(f"[-] Rankings request failed: HTTP {resp.status_code}", flush=True)
+        return False
 
-    for i, title in enumerate(all_titles[:num_authors]):
-        # ── Always emit [N/M] so _run_script can compute a percentage ──
-        prefix = f"[{i + 1}/{num_authors}]"
+    items = resp.json().get('data', [])
+    if not items:
+        logger.info("No items returned — offset may be beyond total ranked manga")
+        print("[*] No items in response — batch is empty", flush=True)
+        return True
 
-        if not title.strip():
-            logger.info(f"{prefix} (blank title — skipped)")
+    # ── Load existing IDs from CSV (source of truth for dedup) ────────────────
+    manga_csv    = DATA_DIR / 'manga.csv'
+    titles_txt   = DATA_DIR / 'titles.txt'
+    authors_txt  = DATA_DIR / 'authors.txt'
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+    existing_ids: set[str] = set()
+    if manga_csv.exists():
+        with open(manga_csv, encoding='utf-8-sig') as f:
+            existing_ids = {row['MangaID'] for row in csv.DictReader(f) if row.get('MangaID')}
+    else:
+        with open(manga_csv, 'w', encoding='utf-8', newline='') as f:
+            csv.writer(f).writerow(MANGA_CSV_FIELDS)
+
+    # ── Ensure gap slots exist for this batch's range ─────────────────────────
+    # Even if every item is skipped, we pad so indices are consistent.
+    last_slot = offset + len(items) - 1
+    _ensure_positional_gap(titles_txt,  last_slot)
+    _ensure_positional_gap(authors_txt, last_slot)
+
+    # ── Process entries ────────────────────────────────────────────────────────
+    new_rows: list[dict] = []
+    total = len(items)
+
+    for i, item in enumerate(items):
+        if is_stop_requested():
+            logger.info("Stop requested during get_manga")
+            print(f"[{i}/{total}] Stop requested", flush=True)
+            break
+
+        node            = item.get('node', {})
+        mal_id          = str(node.get('id', ''))
+        canonical_title = node.get('title', '')
+        slot            = offset + i   # 0-based line index in positional files
+
+        if not mal_id or mal_id in existing_ids:
+            print(f"[{i+1}/{total}] skip {canonical_title}", flush=True)
             continue
 
-        # 1. Already resolved
-        if authors[i].strip():
-            logger.info(f"{prefix} '{title}' → '{authors[i]}' (cached)")
-            continue
+        print(f"[{i+1}/{total}] Fetching details for {mal_id}: {canonical_title}", flush=True)
 
-        # 2. Known authors table
-        known = KNOWN_AUTHORS.get(title.strip().lower())
-        if known:
-            authors[i] = known
-            logger.info(f"{prefix} '{title}' → '{known}' (local table)")
-            _save_lines(authors_path, authors)
-            found_local += 1
-            continue
+        details      = _fetch_manga_details(mal_id)
+        chosen_title = details.pop('EnglishTitle') or canonical_title
+        author_name  = details.get('Author') or 'NULL'
 
-        # 3. Google Books API
-        logger.info(f"{prefix} '{title}' — querying API")
-        data = books_api.get_books_data(title)
+        row = {'MangaID': mal_id, 'Title': chosen_title, **details}
+        new_rows.append(row)
+        existing_ids.add(mal_id)
 
-        if not data or not data.get("items"):
-            logger.warning(f"  No results")
-            logger.warning(f"  Inspect: {books_api.browse_link(title)}")
-            authors[i] = ""
-            failed += 1
-        else:
-            author = books_api.find_valid_author(data, valid_names)
-            if author:
-                surname = author.strip().split()[-1]
-                authors[i] = surname
-                logger.info(f"  Matched: '{author}' → '{surname}'")
-                found_api += 1
-            else:
-                all_found = books_api.list_authors_found(data)
-                logger.warning(f"  No match in valid_authors.txt")
-                logger.warning(f"  Authors returned: {all_found}")
-                logger.warning(f"  Inspect: {books_api.browse_link(title)}")
-                authors[i] = ""
-                failed += 1
+        # Write positionally — won't overwrite an already-filled slot
+        _write_positional_slot(titles_txt,  slot, chosen_title)
+        _write_positional_slot(authors_txt, slot, author_name)
 
-        _save_lines(authors_path, authors)
-        time.sleep(1.0)
+        time.sleep(0.5)
 
-    logger.info(f"Done — local: {found_local}, API: {found_api}, failed: {failed}")
-    logger.info(f"authors.txt: {len(authors)} lines | titles.txt: {len(all_titles)} lines")
+    # ── Persist to CSV ────────────────────────────────────────────────────────
+    if new_rows:
+        with open(manga_csv, 'a', encoding='utf-8', newline='') as f:
+            w = csv.DictWriter(f, fieldnames=MANGA_CSV_FIELDS)
+            w.writerows(new_rows)
+        logger.info(f"Appended {len(new_rows)} entries to manga.csv")
+
+        # ── Upsert into DB ────────────────────────────────────────────────────
+        db_msg = _upsert_manga_to_db(new_rows)
+        print(f"[+] {db_msg}", flush=True)
+        logger.info(db_msg)
+
+        print(f"[+] Added {len(new_rows)} new manga (offset {offset})", flush=True)
+    else:
+        print(f"[*] No new manga found at offset {offset} (all already in manga.csv)", flush=True)
+
     return True
 
+
+# ── Entry point ────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     import sys
     logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
 
     if len(sys.argv) != 2:
-        print("Usage: python api_service.py <number_of_authors>")
+        print("Usage: python api_service.py <offset>")
         sys.exit(1)
 
-    if get_authors_from_api(int(sys.argv[1])):
+    if process_manga_batch(int(sys.argv[1])):
         print("Done")
     else:
         print("Failed")

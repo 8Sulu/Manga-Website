@@ -26,8 +26,25 @@ DB_CONFIG = {
     'database': os.getenv('DB_NAME', 'manga'),
 }
 
-LIBRARY_BASE_URL = "https://lcpl.ent.sirsi.net/client/en_US/lcpl"
+# ── Library registry ──────────────────────────────────────────────────────────
+# LibraryID values must match what is seeded into the `library` table (libraries.csv)
+LIBRARY_MAPPING = {
+    1: {
+        "name":     "Leon County Public Library",
+        "short":    "LCPL",
+        "base_url": "https://lcpl.ent.sirsi.net/client/en_US/lcpl",
+    },
+    2: {
+        "name":     "Broward County Library",
+        "short":    "BCL",
+        "base_url": "https://broward.ent.sirsi.net/client/en_US/default",
+    },
+}
 
+LIBRARY_BASE_URL = LIBRARY_MAPPING[1]["base_url"]   # backward compat
+
+# ── LCPL branch mapping ───────────────────────────────────────────────────────
+# BranchID values must match what is seeded in branches.csv
 BRANCH_MAPPING = {
     "NORTHEAST": 1,
     "BLPERRY":   2,
@@ -37,6 +54,10 @@ BRANCH_MAPPING = {
     "MAIN":      6,
     "WOODVILLE": 7,
 }
+
+# Broward uses a single virtual branch (no per-branch breakdown)
+BROWARD_LIBRARY_ID = 2
+BROWARD_BRANCH_ID  = 8   # "Broward County Library (All Branches)"
 
 SCRAPE_DELAY     = 2
 MAX_RETRIES      = 3

@@ -1,0 +1,44 @@
+# /etc/systemd/system/manga.service
+#
+# Install:
+#   sudo cp manga.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now manga
+
+[Unit]
+Description=Leon County Manga Library (gunicorn)
+After=network.target mysql.service
+Requires=mysql.service
+
+[Service]
+# Run as a dedicated low-privilege user (create with: sudo useradd -r -s /sbin/nologin manga)
+User=manga
+Group=manga
+
+WorkingDirectory=/opt/manga/web
+
+ExecStart=/opt/manga/venv/bin/gunicorn --config /opt/manga/web/gunicorn.conf.py
+
+# Create the socket directory on start; systemd cleans it on stop
+RuntimeDirectory=manga
+RuntimeDirectoryMode=0755
+
+# Restart automatically if gunicorn crashes
+Restart=on-failure
+RestartSec=5
+
+# Give the scraper (Selenium/Chrome) enough time to shut down gracefully
+TimeoutStopSec=60
+
+# Forward stdout/stderr to journald
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=manga
+
+# Basic hardening
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target
