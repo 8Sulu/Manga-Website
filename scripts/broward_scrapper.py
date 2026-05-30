@@ -46,13 +46,17 @@ def _get_db():
     import mysql.connector
     return mysql.connector.connect(**DB_CONFIG)
 
+def _load_title_author_map() -> list[tuple[int, str, str, int]]:
+    """Return list of (1-based-index, title, author, manga_id) from the manga DB table."""
+    conn = _get_db()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT MangaID, Title, Author FROM manga ORDER BY MangaID")
+    rows = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    return [(i + 1, r['Title'], r['Author'] or '', r['MangaID']) for i, r in enumerate(rows)]
 
 def _get_broward_branch_id() -> int:
-    """
-    Return the BranchID for the single Broward County system-wide branch.
-    The branch row must already exist in the DB (seeded via branches.csv /
-    reset).  Raises RuntimeError if not found.
-    """
     conn = _get_db()
     cursor = conn.cursor(dictionary=True)
     cursor.execute(
@@ -71,46 +75,11 @@ def _get_broward_branch_id() -> int:
         )
     return int(row["BranchID"])
 
-
-def _load_manga_id_map() -> dict[str, int]:
-    """Return {title_lower: mal_id} from manga.csv."""
-    path = DATA_DIR / "manga.csv"
-    if not path.exists():
-        log.error("manga.csv not found")
-        return {}
-    result: dict[str, int] = {}
-    with open(path, encoding="utf-8-sig") as f:
-        for row in csv.DictReader(f):
-            title  = (row.get("Title") or "").strip()
-            mal_id = (row.get("MangaID") or "").strip()
-            if title and mal_id:
-                try:
-                    result[title.lower()] = int(mal_id)
-                except ValueError:
-                    pass
-    return result
-
-
-def _upsert_broward_results(manga_id: int, broward_branch_id: int,
-                             results: list[dict]) -> str:
-    """
-    Upsert availability rows for one manga title into the DB.
-
-    Each entry in `results` represents one catalog item found at Broward
-    (a volume or edition).  We store a single row per item:
-      - availability(MangaID, Volume=0)  — Broward doesn't give per-volume nums
-      - branch_availability_status(BranchID=broward_branch_id, Status=…)
-
-    Existing Broward rows for this MangaID are deleted first so re-scraping
-    is idempotent.
-    """
+def _upsert_broward_results(cursor, manga_id: int, broward_branch_id: int, results: list[dict]) -> str:
+    """Requires an active cursor passed from the main loop."""
     if not results:
         return "no results to store"
 
-    conn   = _get_db()
-    cursor = conn.cursor()
-
-    # Delete old Broward rows for this manga
     cursor.execute(
         """
         DELETE bas FROM branch_availability_status bas
@@ -120,7 +89,6 @@ def _upsert_broward_results(manga_id: int, broward_branch_id: int,
         (manga_id, broward_branch_id),
     )
 
-    # Clean up orphan availability rows that now have no branch_status children
     cursor.execute(
         """
         DELETE a FROM availability a
@@ -140,31 +108,21 @@ def _upsert_broward_results(manga_id: int, broward_branch_id: int,
             status = "Available"
         elif holds > 0:
             status = "On Hold"
-        elif total_copies > 0:
-            status = "Checked Out"
         else:
             status = "Checked Out"
 
-        cursor.execute(
-            "INSERT INTO availability (MangaID, Volume) VALUES (%s, %s)",
-            (manga_id, 0),
-        )
+        cursor.execute("INSERT INTO availability (MangaID, Volume) VALUES (%s, %s)", (manga_id, 0))
         avail_id = cursor.lastrowid
 
         cursor.execute(
-            "INSERT INTO branch_availability_status (AvailabilityID, BranchID, `Status`) "
-            "VALUES (%s, %s, %s)",
+            "INSERT INTO branch_availability_status (AvailabilityID, BranchID, `Status`) VALUES (%s, %s, %s)",
             (avail_id, broward_branch_id, status),
         )
         inserted += 1
 
-    conn.commit()
-    cursor.close()
-    conn.close()
     return f"inserted {inserted} Broward availability row(s)"
 
-
-# ── Scraping logic (unchanged from original) ──────────────────────────────────
+# ── Scraping logic ────────────────────────────────────────────────────────────
 
 def get_search_results(session: requests.Session, title: str, author: str,
                        is_debug: bool) -> list[str]:
@@ -279,14 +237,15 @@ def fetch_availability(session: requests.Session, item_id: str, index: int,
             specific_title = title_match.group(1).replace("&#x20;", " ").strip()
 
         sdcsrf_match = re.search(r"sdcsrf=([a-f0-9\-]+)", response_1.text)
-        if not sdcsrf_match:
-            sdcsrf_token = session.cookies.get("sdcsrf")
-            if not sdcsrf_token:
-                if is_debug:
-                    print("[-] Critical: Could not locate 'sdcsrf' token.")
-                return None
-        else:
+        sdcsrf_token = session.cookies.get("sdcsrf") # Safely grab from cookies first
+        
+        if sdcsrf_match:
             sdcsrf_token = sdcsrf_match.group(1)
+            
+        if not sdcsrf_token:
+            if is_debug:
+                print("[-] Critical: Could not locate 'sdcsrf' token.")
+            return None
 
         session.headers.update({"sdcsrf": sdcsrf_token})
 
@@ -319,12 +278,6 @@ def fetch_availability(session: requests.Session, item_id: str, index: int,
 
             if is_debug:
                 print(f"[+] '{specific_title}' — avail={available}/{total_copies} holds={holds}")
-                fields = meta.get("fields", [])
-                if fields:
-                    print(f"\n{'LIBRARY BRANCH':<35} | {'CALL NUMBER':<20} | STATUS")
-                    print("-" * 75)
-                    for field in fields:
-                        print(field)
             else:
                 indicator = "[✓]" if int(available) > 0 else "[X]"
                 print(f"  {indicator} {specific_title} — Available: {available}/{total_copies} | Holds: {holds}")
@@ -341,33 +294,16 @@ def fetch_availability(session: requests.Session, item_id: str, index: int,
             print(f"[-] Parsing failed: {e}")
     return None
 
-
-# ── Positional file helpers (mirrors scrapper.py) ─────────────────────────────
-
-def _read_positional(path: Path) -> list[str]:
-    if not path.exists():
-        return []
-    return [line.rstrip("\n") for line in path.open(encoding="utf-8")]
-
-
 # ── Main processing ───────────────────────────────────────────────────────────
 
 def process_batch(args: argparse.Namespace) -> None:
     logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO,
                         format="%(levelname)s %(message)s")
 
-    titles_path  = DATA_DIR / "titles.txt"
-    authors_path = DATA_DIR / "authors.txt"
-
-    # Positional read — blank lines are gap slots, silently skipped
-    titles  = _read_positional(titles_path)
-    authors = _read_positional(authors_path)
-
-    if not titles:
-        print("[-] titles.txt not found or empty")
+    all_pairs = _load_title_author_map()
+    if not all_pairs:
+        print("[-] No titles found in DB.")
         return
-
-    manga_id_map = _load_manga_id_map()
 
     # ── Resolve which 1-based indices to process ──────────────────────────────
     if args.indices:
@@ -384,30 +320,16 @@ def process_batch(args: argparse.Namespace) -> None:
             print("[-] Invalid --range format. Use START-END (e.g. --range 1-50)")
             return
     else:
-        indices = list(range(1, len(titles) + 1))
+        indices = list(range(1, len(all_pairs) + 1))
 
-    # Build (title, author, mal_id) triples, skipping blanks/missing
-    pairs: list[tuple[str, str, int]] = []
+    pairs_to_scrape = []
     for idx in indices:
-        pos = idx - 1
-        if pos < 0 or pos >= len(titles):
+        if 1 <= idx <= len(all_pairs):
+            pairs_to_scrape.append(all_pairs[idx - 1])
+        else:
             log.warning(f"Index {idx} out of range — skipping")
-            continue
-        title = titles[pos].strip()
-        if not title:
-            log.debug(f"Index {idx} is a gap slot — skipping")
-            continue
-        author = authors[pos].strip() if pos < len(authors) else ""
-        if not author:
-            log.warning(f"Index {idx} '{title}' has no author — skipping")
-            continue
-        mal_id = manga_id_map.get(title.lower())
-        if mal_id is None:
-            log.warning(f"Index {idx} '{title}' not found in manga.csv — skipping")
-            continue
-        pairs.append((title, author, mal_id))
 
-    if not pairs:
+    if not pairs_to_scrape:
         print("[-] No valid titles to scrape.")
         return
 
@@ -419,7 +341,7 @@ def process_batch(args: argparse.Namespace) -> None:
         return
 
     print(f"[*] Broward branch ID: {broward_branch_id}")
-    print(f"[*] Scraping {len(pairs)} title(s)…\n")
+    print(f"[*] Scraping {len(pairs_to_scrape)} title(s)…\n")
 
     # ── Set up optional CSV output ────────────────────────────────────────────
     csv_file = None
@@ -436,19 +358,25 @@ def process_batch(args: argparse.Namespace) -> None:
         print(f"[*] Saving CSV to: {out_path}\n")
 
     # ── Scrape ────────────────────────────────────────────────────────────────
+    conn = _get_db()
+    cursor = conn.cursor()
     session = requests.Session()
     session.headers.update(HEADERS)
 
-    for progress, (title, author, manga_id) in enumerate(pairs, start=1):
-        print(f"[{progress}/{len(pairs)}] {title}", flush=True)
+    for progress, (idx, title, author, manga_id) in enumerate(pairs_to_scrape, start=1):
+        if not author:
+            log.warning(f"Index {idx} '{title}' has no author — skipping")
+            continue
+            
+        print(f"[{progress}/{len(pairs_to_scrape)}] {title}", flush=True)
 
         item_ids = get_search_results(session, title, author, args.debug)
 
         title_results: list[dict] = []
         total_items = len(item_ids)
 
-        for idx, item_id in enumerate(item_ids, start=1):
-            result = fetch_availability(session, item_id, idx, total_items,
+        for i, item_id in enumerate(item_ids, start=1):
+            result = fetch_availability(session, item_id, i, total_items,
                                         title, args.debug)
             if result:
                 title_results.append(result)
@@ -464,20 +392,22 @@ def process_batch(args: argparse.Namespace) -> None:
         # ── Write to DB ───────────────────────────────────────────────────────
         if title_results:
             try:
-                msg = _upsert_broward_results(manga_id, broward_branch_id, title_results)
+                msg = _upsert_broward_results(cursor, manga_id, broward_branch_id, title_results)
+                conn.commit()  # Commit after each title is successfully processed
                 print(f"  [DB] {msg}")
             except Exception as e:
+                conn.rollback()
                 print(f"  [DB] Error saving '{title}': {e}")
         else:
             print(f"  [--] No results to store for '{title}'")
+
+    cursor.close()
+    conn.close()
 
     if csv_file:
         csv_file.close()
 
     print("\n[*] Done.")
-
-
-# ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

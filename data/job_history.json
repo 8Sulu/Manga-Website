@@ -2,19 +2,19 @@
   {
     "job": "db-reset",
     "status": "done",
-    "message": "\u2713 Schema reset; \u2713 manga.csv; \u2717 libraries.csv: [Errno 2] No such file or directory: '/home/ethan/Projects/manga-website/data/libraries.csv'; \u2717 branches.csv: [Errno 2] No such file or directory: '/home/ethan/Projects/manga-website/data/branches.csv'; \u2713 availability.csv is empty",
+    "message": "✓ Schema reset; ✓ manga.csv; ✗ libraries.csv: [Errno 2] No such file or directory: '/home/ethan/Projects/manga-website/data/libraries.csv'; ✗ branches.csv: [Errno 2] No such file or directory: '/home/ethan/Projects/manga-website/data/branches.csv'; ✓ availability.csv is empty",
     "at": "2026-05-28T04:13:15.782712+00:00"
   },
   {
     "job": "db-reset",
     "status": "done",
-    "message": "\u2713 Schema reset; \u2713 manga.csv; \u2713 libraries.csv; \u2717 branches.csv: 1265 (01000): Data truncated for column 'LibraryID' at row 1; \u2713 availability.csv is empty",
+    "message": "✓ Schema reset; ✓ manga.csv; ✓ libraries.csv; ✗ branches.csv: 1265 (01000): Data truncated for column 'LibraryID' at row 1; ✓ availability.csv is empty",
     "at": "2026-05-28T04:15:17.198278+00:00"
   },
   {
     "job": "db-reset",
     "status": "done",
-    "message": "\u2713 Schema reset; \u2713 manga.csv; \u2713 libraries.csv; \u2713 branches.csv; \u2713 availability.csv is empty",
+    "message": "✓ Schema reset; ✓ manga.csv; ✓ libraries.csv; ✓ branches.csv; ✓ availability.csv is empty",
     "at": "2026-05-28T04:17:29.008211+00:00"
   },
   {
@@ -26,13 +26,13 @@
   {
     "job": "scrape",
     "status": "done",
-    "message": "Updated MangaIDs 13\u20131706: deleted 0 old, inserted 354 avail + 354 branch rows",
+    "message": "Updated MangaIDs 13–1706: deleted 0 old, inserted 354 avail + 354 branch rows",
     "at": "2026-05-28T04:20:33.263540+00:00"
   },
   {
     "job": "db-reset",
     "status": "done",
-    "message": "\u2713 Schema reset; \u2713 manga.csv; \u2713 libraries.csv; \u2713 branches.csv; \u2713 No availability rows matched existing MangaIDs",
+    "message": "✓ Schema reset; ✓ manga.csv; ✓ libraries.csv; ✓ branches.csv; ✓ No availability rows matched existing MangaIDs",
     "at": "2026-05-29T01:12:16.322356+00:00"
   },
   {
@@ -44,7 +44,7 @@
   {
     "job": "scrape",
     "status": "done",
-    "message": "Updated MangaIDs 1\u2013152024: deleted 0 old, inserted 1635 avail + 1635 branch rows",
+    "message": "Updated MangaIDs 1–152024: deleted 0 old, inserted 1635 avail + 1635 branch rows",
     "at": "2026-05-29T01:36:09.427585+00:00"
   },
   {
@@ -56,31 +56,31 @@
   {
     "job": "db-reset",
     "status": "done",
-    "message": "\u2713 Schema reset; \u2717 manga.csv: Not all parameters were used in the SQL statement; \u2713 libraries.csv; \u2713 branches.csv; \u2713 No availability rows matched existing MangaIDs",
+    "message": "✓ Schema reset; ✗ manga.csv: Not all parameters were used in the SQL statement; ✓ libraries.csv; ✓ branches.csv; ✓ No availability rows matched existing MangaIDs",
     "at": "2026-05-29T04:36:41.118631+00:00"
   },
   {
     "job": "db-reset",
     "status": "done",
-    "message": "\u2713 Schema reset; \u2717 manga.csv: Not all parameters were used in the SQL statement; \u2713 libraries.csv; \u2713 branches.csv; \u2713 No availability rows matched existing MangaIDs",
+    "message": "✓ Schema reset; ✗ manga.csv: Not all parameters were used in the SQL statement; ✓ libraries.csv; ✓ branches.csv; ✓ No availability rows matched existing MangaIDs",
     "at": "2026-05-29 00:39 EST"
   },
   {
     "job": "db-reset",
     "status": "done",
-    "message": "\u2713 Schema reset; \u2713 manga.csv (500 rows); \u2713 libraries.csv; \u2713 branches.csv; \u2713 Updated MangaIDs 1\u2013152024: deleted 0 old, inserted 1635 avail + 1635 branch rows",
+    "message": "✓ Schema reset; ✓ manga.csv (500 rows); ✓ libraries.csv; ✓ branches.csv; ✓ Updated MangaIDs 1–152024: deleted 0 old, inserted 1635 avail + 1635 branch rows",
     "at": "2026-05-29T04:41:48.178851+00:00"
   },
   {
     "job": "db-reset",
     "status": "done",
-    "message": "\u2713 Schema reset; \u2713 manga.csv; \u2713 libraries.csv; \u2713 branches.csv; \u2713 Updated MangaIDs 1\u2013152024: deleted 0 old, inserted 1635 avail + 1635 branch rows",
+    "message": "✓ Schema reset; ✓ manga.csv; ✓ libraries.csv; ✓ branches.csv; ✓ Updated MangaIDs 1–152024: deleted 0 old, inserted 1635 avail + 1635 branch rows",
     "at": "2026-05-29T04:49:26.676657+00:00"
   },
   {
     "job": "db-reset",
     "status": "done",
-    "message": "\u2713 Schema reset; \u2713 manga.csv; \u2713 libraries.csv; \u2713 branches.csv; \u2713 availability.csv not found",
+    "message": "✓ Schema reset; ✓ manga.csv; ✓ libraries.csv; ✓ branches.csv; ✓ availability.csv not found",
     "at": "2026-05-29T04:50:22.797272+00:00"
   },
   {
@@ -92,7 +92,151 @@
   {
     "job": "scrape",
     "status": "done",
-    "message": "Updated MangaIDs 13\u20131706: deleted 0 old, inserted 355 avail + 355 branch rows",
+    "message": "Updated MangaIDs 13–1706: deleted 0 old, inserted 355 avail + 355 branch rows",
     "at": "2026-05-29T05:39:31.676845+00:00"
+  },
+  {
+    "job": "get_manga",
+    "status": "done",
+    "message": "done",
+    "at": "2026-05-30T00:07:21.209734+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "done",
+    "at": "2026-05-30T00:10:17.216049+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "done",
+    "at": "2026-05-30T00:17:48.628878+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "done",
+    "at": "2026-05-30T00:27:27.618230+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "done",
+    "at": "2026-05-30T00:35:07.279554+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "stopped",
+    "at": "2026-05-30T00:35:33.206724+00:00"
+  },
+  {
+    "job": "reset",
+    "status": "done",
+    "message": "✓ Schema recreated · ✓ manga.csv · ✓ libraries.csv · ✓ branches.csv",
+    "at": "2026-05-30T02:57:37.878286"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[-] No Broward branch found in the database. Make sure libraries.csv / branches.csv include a Broward entry and run DB r",
+    "at": "2026-05-30T02:58:32.343104"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[-] No Broward branch found in the database. Make sure libraries.csv / branches.csv include a Broward entry and run DB r",
+    "at": "2026-05-30T02:58:38.712891"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 0 LCPL availability rows",
+    "at": "2026-05-30T03:04:41.438551"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[-] No Broward branch found in the database. Make sure libraries.csv / branches.csv include a Broward entry and run DB r",
+    "at": "2026-05-30T03:14:43.372940"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[-] No Broward branch found in the database. Make sure libraries.csv / branches.csv include a Broward entry and run DB r",
+    "at": "2026-05-30T03:15:35.814104"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[-] No Broward branch found in the database. Make sure libraries.csv / branches.csv include a Broward entry and run DB r",
+    "at": "2026-05-30T03:15:41.492115"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[-] No Broward branch found in the database. Make sure libraries.csv / branches.csv include a Broward entry and run DB r",
+    "at": "2026-05-30T03:16:57.901287"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[-] No Broward branch found in the database. Make sure libraries.csv / branches.csv include a Broward entry and run DB r",
+    "at": "2026-05-30T04:16:41.604377"
+  },
+  {
+    "job": "reset",
+    "status": "done",
+    "message": "✓ Schema recreated · ✓ manga.csv · ✓ libraries.csv · ✓ branches.csv",
+    "at": "2026-05-30T04:16:46.791760"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[-] No Broward branch found in the database. Make sure libraries.csv / branches.csv include a Broward entry and run DB r",
+    "at": "2026-05-30T04:16:52.386760"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[-] No Broward branch found in the database. Make sure libraries.csv / branches.csv include a Broward entry and run DB r",
+    "at": "2026-05-30T04:17:03.947732"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[-] No Broward branch found in the database. Make sure libraries.csv / branches.csv include a Broward entry and run DB r",
+    "at": "2026-05-30T04:17:52.908846"
+  },
+  {
+    "job": "reset",
+    "status": "done",
+    "message": "✓ Schema recreated · ✓ manga.csv · ✓ libraries.csv · ✓ branches.csv",
+    "at": "2026-05-30T04:17:58.192970"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-05-30T04:18:15.691057"
+  },
+  {
+    "job": "reset",
+    "status": "done",
+    "message": "✓ Schema recreated · ✓ manga.csv · ✓ libraries.csv · ✓ branches.csv",
+    "at": "2026-05-30T04:22:56.254506"
+  },
+  {
+    "job": "get_manga",
+    "status": "done",
+    "message": "All runs complete.",
+    "at": "2026-05-30T04:32:40.944254"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 0 LCPL availability rows",
+    "at": "2026-05-30T04:36:11.276076"
   }
 ]

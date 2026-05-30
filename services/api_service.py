@@ -160,59 +160,10 @@ def _upsert_manga_to_db(rows: list[dict]) -> str:
         logger.warning(f"DB upsert failed (CSV still updated): {e}")
         return f"DB upsert failed: {e}"
 
-
-def _read_positional_lines(path: Path) -> list[str]:
-    """
-    Read a positional text file (titles.txt / authors.txt) preserving blank-line
-    slots.  Returns a list where index i = line i (0-based), blank for gaps.
-    """
-    if not path.exists():
-        return []
-    return [line.rstrip('\n') for line in path.open(encoding='utf-8')]
-
-
-def _write_positional_slot(path: Path, slot_index: int, value: str) -> None:
-    """
-    Write `value` at 0-based `slot_index` in a positional flat file.
-    Pads with blank lines if the file is shorter than slot_index.
-    If the slot already has a non-blank value, it is left untouched (skip).
-    """
-    lines = _read_positional_lines(path)
-    # Extend with blank lines up to slot_index
-    while len(lines) <= slot_index:
-        lines.append('')
-    if lines[slot_index].strip():
-        return  # already filled — don't overwrite
-    lines[slot_index] = value
-    with path.open('w', encoding='utf-8') as f:
-        for line in lines:
-            f.write(line + '\n')
-
-
-def _ensure_positional_gap(path: Path, up_to_index: int) -> None:
-    """
-    Ensure the file has at least (up_to_index + 1) lines, padding with blanks.
-    Used to reserve slots for a gap (e.g. offset 1000 run before offset 500).
-    """
-    lines = _read_positional_lines(path)
-    if len(lines) >= up_to_index + 1:
-        return
-    while len(lines) <= up_to_index:
-        lines.append('')
-    with path.open('w', encoding='utf-8') as f:
-        for line in lines:
-            f.write(line + '\n')
-
-
 def process_manga_batch(offset: int) -> bool:
     """
     Fetch up to 500 ranked titles from MAL starting at <offset>.
-
-    Titles/authors/manga.csv are written positionally so that:
-      - Line (offset + i) in titles.txt = rank (offset + i + 1) title
-      - Running offset 0 then offset 1000 leaves lines 500-999 blank
-      - Going back with offset 500 fills those blank slots without disrupting others
-    After fetching, new rows are also upserted directly into the manga DB table.
+    New rows are appended to manga.csv and upserted into the manga DB table.
     """
     clear_stop()
 
@@ -236,9 +187,7 @@ def process_manga_batch(offset: int) -> bool:
         return True
 
     # ── Load existing IDs from CSV (source of truth for dedup) ────────────────
-    manga_csv    = DATA_DIR / 'manga.csv'
-    titles_txt   = DATA_DIR / 'titles.txt'
-    authors_txt  = DATA_DIR / 'authors.txt'
+    manga_csv = DATA_DIR / 'manga.csv'
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
     existing_ids: set[str] = set()
@@ -248,12 +197,6 @@ def process_manga_batch(offset: int) -> bool:
     else:
         with open(manga_csv, 'w', encoding='utf-8', newline='') as f:
             csv.writer(f).writerow(MANGA_CSV_FIELDS)
-
-    # ── Ensure gap slots exist for this batch's range ─────────────────────────
-    # Even if every item is skipped, we pad so indices are consistent.
-    last_slot = offset + len(items) - 1
-    _ensure_positional_gap(titles_txt,  last_slot)
-    _ensure_positional_gap(authors_txt, last_slot)
 
     # ── Process entries ────────────────────────────────────────────────────────
     new_rows: list[dict] = []
@@ -268,7 +211,6 @@ def process_manga_batch(offset: int) -> bool:
         node            = item.get('node', {})
         mal_id          = str(node.get('id', ''))
         canonical_title = node.get('title', '')
-        slot            = offset + i   # 0-based line index in positional files
 
         if not mal_id or mal_id in existing_ids:
             print(f"[{i+1}/{total}] skip {canonical_title}", flush=True)
@@ -278,36 +220,26 @@ def process_manga_batch(offset: int) -> bool:
 
         details      = _fetch_manga_details(mal_id)
         chosen_title = details.pop('EnglishTitle') or canonical_title
-        author_name  = details.get('Author') or 'NULL'
 
         row = {'MangaID': mal_id, 'Title': chosen_title, **details}
         new_rows.append(row)
         existing_ids.add(mal_id)
-
-        # Write positionally — won't overwrite an already-filled slot
-        _write_positional_slot(titles_txt,  slot, chosen_title)
-        _write_positional_slot(authors_txt, slot, author_name)
-
         time.sleep(0.5)
 
-    # ── Persist to CSV ────────────────────────────────────────────────────────
+    # ── Persist to CSV & DB ───────────────────────────────────────────────────
     if new_rows:
         with open(manga_csv, 'a', encoding='utf-8', newline='') as f:
             w = csv.DictWriter(f, fieldnames=MANGA_CSV_FIELDS)
             w.writerows(new_rows)
         logger.info(f"Appended {len(new_rows)} entries to manga.csv")
 
-        # ── Upsert into DB ────────────────────────────────────────────────────
         db_msg = _upsert_manga_to_db(new_rows)
         print(f"[+] {db_msg}", flush=True)
-        logger.info(db_msg)
-
         print(f"[+] Added {len(new_rows)} new manga (offset {offset})", flush=True)
     else:
         print(f"[*] No new manga found at offset {offset} (all already in manga.csv)", flush=True)
 
     return True
-
 
 # ── Entry point ────────────────────────────────────────────────────────────────
 

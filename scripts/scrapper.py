@@ -39,8 +39,10 @@ RESULTS_PER_PAGE = 12
 REQUEST_DELAY    = 0.5
 MAX_RETRIES      = 3
 
-def _load_title_author_map() -> list[tuple[int, str, str]]:
-    """Return list of (index, title, author) from the manga DB table, ordered by MangaID."""
+# ── Database Source of Truth ──────────────────────────────────────────────────
+
+def _load_title_author_map() -> list[tuple[int, str, str, int]]:
+    """Return list of (1-based-index, title, author, manga_id) from the manga DB table."""
     from config.settings import DB_CONFIG
     import mysql.connector
     conn = mysql.connector.connect(**DB_CONFIG)
@@ -49,33 +51,7 @@ def _load_title_author_map() -> list[tuple[int, str, str]]:
     rows = cursor.fetchall()
     cursor.close()
     conn.close()
-    return [(i + 1, r['Title'], r['Author'] or '') for i, r in enumerate(rows)]
-
-# ── manga.csv → MAL ID map ────────────────────────────────────────────────────
-
-def _load_manga_id_map() -> dict[str, int]:
-    """
-    Return {title: mal_id} from manga.csv so the scraper can write the correct
-    MangaID. Forces lowercase keys and strips whitespace for strict matching.
-    """
-    path = DATA_DIR / "manga.csv"
-    if not path.exists():
-        log.error("manga.csv not found — MangaIDs will be missing")
-        return {}
-    result: dict[str, int] = {}
-    with open(path, encoding="utf-8-sig") as f:
-        for row in csv.DictReader(f):
-            # FIX: Ensure everything is stripped cleanly
-            title  = (row.get("Title") or "").strip()
-            mal_id = (row.get("MangaID") or row.get("Id") or "").strip()
-            if title and mal_id:
-                try:
-                    val = int(mal_id)
-                    # Force all keys to lowercase for foolproof lookups
-                    result[title.lower()] = val  
-                except ValueError:
-                    pass
-    return result
+    return [(i + 1, r['Title'], r['Author'] or '', r['MangaID']) for i, r in enumerate(rows)]
 
 # ── HTTP session ──────────────────────────────────────────────────────────────
 
@@ -90,8 +66,6 @@ def make_session() -> requests.Session:
         "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.5",
     })
-    # Prime session cookies — SirsiDynix requires a session established on the
-    # homepage before search results pages return data correctly.
     try:
         s.get(CATALOG_BASE, timeout=20)
         s.headers.update({"Referer": CATALOG_BASE})
@@ -99,7 +73,6 @@ def make_session() -> requests.Session:
     except Exception as e:
         log.warning(f"Session prime failed (continuing): {e}")
     return s
-
 
 # ── Step 1: search page → catalog keys ───────────────────────────────────────
 
@@ -115,7 +88,6 @@ def _extract_keys_from_href(href: str, keys: list, seen: set) -> None:
             if k not in seen:
                 seen.add(k)
                 keys.append(k)
-
 
 def fetch_catalog_keys(session: requests.Session, title: str, author: str,
                        page: int = 0) -> list:
@@ -149,17 +121,14 @@ def fetch_catalog_keys(session: requests.Session, title: str, author: str,
     keys: list = []
     seen: set  = set()
 
-    # Primary: links with id starting "detailLink"
     for a in soup.find_all("a", id=re.compile(r"^detailLink")):
         _extract_keys_from_href(a.get("href", ""), keys, seen)
 
-    # Fallback: any link whose href contains SD_ILS
     if not keys:
         for a in soup.find_all("a", href=True):
             _extract_keys_from_href(a["href"], keys, seen)
 
     return keys
-
 
 # ── Step 2: ILSWS API ─────────────────────────────────────────────────────────
 
@@ -167,7 +136,6 @@ def _strip_jsonp(text: str) -> str:
     text = text.strip()
     m = re.match(r'^[^(]*\((.*)\)\s*;?\s*$', text, re.DOTALL)
     return m.group(1) if m else text
-
 
 def fetch_title_info(session: requests.Session, catalog_key: int,
                      debug_dir=None) -> dict:
@@ -201,7 +169,6 @@ def fetch_title_info(session: requests.Session, catalog_key: int,
             time.sleep(2 ** attempt)
     return {}
 
-
 # ── Step 3: parse response ────────────────────────────────────────────────────
 
 def extract_volume_from_callnumber(call_number: str) -> int:
@@ -210,7 +177,6 @@ def extract_volume_from_callnumber(call_number: str) -> int:
         return int(m.group(1))
     nums = re.findall(r'\d+', call_number)
     return int(nums[-1]) if nums else 0
-
 
 def item_status(current_loc: str, due_date) -> str:
     loc = (current_loc or "").upper()
@@ -222,7 +188,6 @@ def item_status(current_loc: str, due_date) -> str:
         return "In Transit"
     return "Graphic Novel - Young Adult Fiction"
 
-
 def parse_title_info(data: dict, manga_id: int, availability_id: int) -> tuple:
     books = []
     valid_branch_keys = {k.upper() for k in BRANCH_MAPPING}
@@ -231,7 +196,6 @@ def parse_title_info(data: dict, manga_id: int, availability_id: int) -> tuple:
         for call in title_entry.get("CallInfo", []):
             library_id = (call.get("libraryID") or "").strip().upper()
             if library_id not in valid_branch_keys:
-                log.debug(f"  Unknown libraryID {library_id!r} — skipped")
                 continue
 
             call_number = call.get("callNumber") or ""
@@ -242,11 +206,7 @@ def parse_title_info(data: dict, manga_id: int, availability_id: int) -> tuple:
                 for item in call.get("ItemInfo", [])
             ] or ["Graphic Novel - Young Adult Fiction"]
 
-            # If any copy is on shelf, report the branch as available
-            final_status = next(
-                (s for s in statuses if "Checked Out" not in s),
-                "Checked Out",
-            )
+            final_status = next((s for s in statuses if "Checked Out" not in s), "Checked Out")
 
             books.append({
                 "manga_id":        manga_id,
@@ -258,82 +218,41 @@ def parse_title_info(data: dict, manga_id: int, availability_id: int) -> tuple:
 
     return books, availability_id
 
-
 # ── Orchestration ─────────────────────────────────────────────────────────────
-
-def _read_positional(path: Path) -> list[str]:
-    """
-    Read a positional flat file preserving blank lines.
-    Returns list where index i = line i (0-based), '' for blank/gap slots.
-    """
-    if not path.exists():
-        return []
-    return [line.rstrip('\n') for line in path.open(encoding='utf-8')]
-
 
 def scrape(start: int = 1, end: int = 1,
            indices: list[int] | None = None,
            debug: bool = False) -> list:
-    """
-    Scrape library availability.
-
-    Titles and authors are read positionally — blank lines are gap slots from
-    out-of-order get_manga runs and are silently skipped.  Indices are always
-    1-based line numbers in the positional files.
-    """
-    titles_path  = DATA_DIR / "titles.txt"
-    authors_path = DATA_DIR / "authors.txt"
-    debug_dir    = DATA_DIR.parent / "debug" if debug else None
-
-    # Positional read — preserves blank gap slots
-    titles  = _read_positional(titles_path)
-    authors = _read_positional(authors_path)
-
-    manga_id_map = _load_manga_id_map()
-
-    def _resolve(pos: int, label: str):
-        """Return (title, author, mal_id) for 0-based pos, or None to skip."""
-        if pos < 0 or pos >= len(titles):
-            log.warning(f"  {label} out of range (file has {len(titles)} lines) — skipping")
-            return None
-        t = titles[pos].strip()
-        if not t:
-            log.debug(f"  {label} is a gap slot (blank line) — skipping")
-            return None
-        a = authors[pos].strip() if pos < len(authors) else ""
-        if not a:
-            log.warning(f"  {label} '{t}' has no author — skipping")
-            return None
-        mal_id = manga_id_map.get(t.lower())
-        if mal_id is None:
-            log.warning(f"  {label} '{t}' not found in manga.csv — skipping")
-            return None
-        return t, a, mal_id
+    debug_dir = DATA_DIR.parent / "debug" if debug else None
+    
+    all_pairs = _load_title_author_map()
+    pairs_to_scrape = []
 
     if indices is not None:
-        pairs = []
         for i in indices:
-            result = _resolve(i - 1, f"Index {i}")
-            if result:
-                pairs.append(result)
+            if 1 <= i <= len(all_pairs):
+                pairs_to_scrape.append(all_pairs[i - 1])
+            else:
+                log.warning(f"  Index {i} out of range — skipping")
     else:
         start = max(1, start)
-        end   = min(end, len(titles))
-        pairs = []
+        end   = min(end, len(all_pairs))
         for i in range(start - 1, end):
-            result = _resolve(i, f"Line {i+1}")
-            if result:
-                pairs.append(result)
+            pairs_to_scrape.append(all_pairs[i])
 
-    log.info(f"Scraping {len(pairs)} titles via ILSWS REST API")
+    log.info(f"Scraping {len(pairs_to_scrape)} titles via ILSWS REST API")
 
     session         = make_session()
     all_books: list = []
     availability_id = 1
 
-    for progress, (title, author, manga_id) in enumerate(pairs, start=1):
-        log.info(f"[{progress}/{len(pairs)}] (ID {manga_id}) {title!r} by {author!r}")
-        print(f"[{progress}/{len(pairs)}] {title}", flush=True)
+    for progress, (idx, title, author, manga_id) in enumerate(pairs_to_scrape, start=1):
+        if not author:
+            log.warning(f"  Index {idx} '{title}' has no author — skipping")
+            continue
+
+        log.info(f"[{progress}/{len(pairs_to_scrape)}] (ID {manga_id}) {title!r} by {author!r}")
+        print(f"[{progress}/{len(pairs_to_scrape)}] {title}", flush=True)
 
         catalog_keys: list = []
         seen_keys:    set  = set()
@@ -374,34 +293,45 @@ def scrape(start: int = 1, end: int = 1,
     log.info(f"Scraping complete — {len(all_books)} volume entries")
     return all_books
 
+def _load_branch_id_map(cursor) -> dict:
+    cursor.execute("SELECT BranchID, BranchName FROM branch")
+    return {row[1].upper(): row[0] for row in cursor.fetchall()}
 
 def write_to_db(books: list) -> str:
+    if not books:
+        return "no books to write"
+
     from config.settings import DB_CONFIG
     import mysql.connector
     conn = mysql.connector.connect(**DB_CONFIG)
     cursor = conn.cursor()
 
+    # Get the exact LibraryID for Leon County
+    cursor.execute("SELECT LibraryID FROM library WHERE LibraryName LIKE '%Leon%' LIMIT 1")
+    lcpl_library_id = cursor.fetchone()[0]
+
     manga_ids = list({b["manga_id"] for b in books})
-    # Delete old LCPL rows for these titles only
-    cursor.execute("""
+    placeholders = ','.join(['%s'] * len(manga_ids))
+    
+    # Safe Deletion targeting the exact Library ID
+    cursor.execute(f"""
         DELETE bas FROM branch_availability_status bas
         JOIN availability a ON bas.AvailabilityID = a.AvailabilityID
         JOIN branch b ON bas.BranchID = b.BranchID
-        JOIN library l ON b.LibraryID = l.LibraryID
-        WHERE a.MangaID IN ({})
-          AND l.LibraryName LIKE '%Leon%'
-    """.format(','.join(['%s'] * len(manga_ids))), tuple(manga_ids))
-    cursor.execute("""
+        WHERE a.MangaID IN ({placeholders})
+          AND b.LibraryID = %s
+    """, (*manga_ids, lcpl_library_id))
+    
+    cursor.execute(f"""
         DELETE a FROM availability a
         LEFT JOIN branch_availability_status bas ON a.AvailabilityID = bas.AvailabilityID
         JOIN branch b ON bas.BranchID = b.BranchID  
-        JOIN library l ON b.LibraryID = l.LibraryID
-        WHERE a.MangaID IN ({})
-          AND l.LibraryName LIKE '%Leon%'
+        WHERE a.MangaID IN ({placeholders})
+          AND b.LibraryID = %s
           AND bas.AvailabilityID IS NULL
-    """.format(','.join(['%s'] * len(manga_ids))), tuple(manga_ids))
+    """, (*manga_ids, lcpl_library_id))
 
-    branch_id_map = _load_branch_id_map(cursor)  # SELECT BranchID, BranchName FROM branch
+    branch_id_map = _load_branch_id_map(cursor)
     inserted = 0
     for b in books:
         cursor.execute("INSERT INTO availability (MangaID, Volume) VALUES (%s, %s)",
@@ -414,11 +344,11 @@ def write_to_db(books: list) -> str:
                     "INSERT INTO branch_availability_status (AvailabilityID, BranchID, Status) "
                     "VALUES (%s, %s, %s)", (avail_id, branch_id, status))
                 inserted += 1
+                
     conn.commit()
     cursor.close()
     conn.close()
     return f"inserted {inserted} LCPL availability rows"
-
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
@@ -448,10 +378,8 @@ if __name__ == "__main__":
 
     if args.indices:
         books = scrape(indices=args.indices, debug=args.debug)
-
     elif args.line:
         books = scrape(indices=[args.line], debug=args.debug)
-
     elif args.range:
         try:
             parts = args.range.split("-")
@@ -461,9 +389,7 @@ if __name__ == "__main__":
             print("Invalid --range format. Use START-END (e.g. --range 1-50)")
             sys.exit(1)
         books = scrape(start=start, end=end, debug=args.debug)
-
     elif args.positional:
-        # Legacy positional interface — still used by backend.py subprocess calls
         pos = args.positional
         try:
             if len(pos) == 1:
@@ -476,9 +402,8 @@ if __name__ == "__main__":
         except ValueError:
             print(__doc__)
             sys.exit(1)
-
     else:
         print(__doc__)
         sys.exit(1)
 
-    write_to_db(books)
+    print(write_to_db(books))
