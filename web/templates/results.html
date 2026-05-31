@@ -6,250 +6,49 @@
   <title>Search Results — Manga Tracker</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <style>
-    /* ── Cover grid ─────────────────────────────────────────────── */
-    .results-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(165px, 1fr));
-      gap: 14px;
+    /* ── Results page extras ──────────────────────────────── */
+    .page-header {
+      padding: 1.25rem 0 1rem; border-bottom: 1px solid var(--border); margin-bottom: 1.5rem;
+      display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
     }
-    .manga-card {
-      background: var(--bg2);
-      border: 1px solid var(--border);
-      border-radius: var(--r-lg);
-      overflow: hidden;
-      cursor: pointer;
-      transition: transform .18s, border-color .18s, box-shadow .18s;
-    }
-    .manga-card:hover {
-      transform: translateY(-3px);
-      border-color: var(--border2);
-      box-shadow: 0 8px 32px rgba(0,0,0,.4);
-    }
-    .manga-card.open {
-      grid-column: 1 / -1;
-      display: grid;
-      grid-template-columns: 165px 1fr;
-    }
-
-    /* ── Cover art ──────────────────────────────────────────────── */
-    .manga-cover {
-      width: 100%;
-      aspect-ratio: 2/3;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: flex-end;
-      padding: .6rem .6rem .7rem;
-      position: relative;
-      overflow: hidden;
-    }
-    .manga-card.open .manga-cover { aspect-ratio: auto; min-height: 200px; }
-    .cover-initial {
-      position: absolute; top: 50%; left: 50%;
-      transform: translate(-50%, -60%);
-      font-family: var(--display); font-size: 3.5rem; font-weight: 800;
-      color: rgba(255,255,255,.15); line-height: 1;
-      pointer-events: none; user-select: none;
-    }
-    .cover-score {
-      position: relative; font-family: var(--mono); font-size: .65rem;
-      color: rgba(255,255,255,.7); background: rgba(0,0,0,.4);
-      padding: 2px 6px; border-radius: 4px;
-      backdrop-filter: blur(4px); align-self: flex-end;
-    }
-
-    /* ── Card body ──────────────────────────────────────────────── */
-    .manga-body { padding: .65rem .75rem .75rem; }
-    .manga-card.open .manga-body {
-      padding: 1rem 1.25rem;
-      display: flex; flex-direction: column; gap: .5rem;
-    }
-    .manga-card-title {
-      font-size: .82rem; font-weight: 500; color: var(--text);
-      line-height: 1.3; margin-bottom: .35rem;
-      display: -webkit-box; -webkit-line-clamp: 2;
-      -webkit-box-orient: vertical; overflow: hidden;
-    }
-    .manga-card.open .manga-card-title { font-size: 1rem; -webkit-line-clamp: unset; overflow: visible; }
-    .manga-card-meta { font-family: var(--mono); font-size: .62rem; color: var(--text3); margin-bottom: .45rem; }
-
-    /* ── Traffic light ──────────────────────────────────────────── */
-    .tl-row { display: flex; gap: 5px; flex-wrap: wrap; }
-    .tl-chip {
-      display: inline-flex; align-items: center; gap: 4px;
-      font-family: var(--mono); font-size: .62rem;
-      padding: 2px 7px; border-radius: 99px; border: 1px solid;
-    }
-    .tl-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
-    .tl-avail  { background: var(--green-bg);  border-color: var(--green-brd);  color: var(--green); }
-    .tl-avail .tl-dot  { background: var(--green); }
-    .tl-out    { background: var(--red-bg);    border-color: var(--red-brd);    color: var(--red); }
-    .tl-out .tl-dot    { background: var(--red); }
-    .tl-hold   { background: var(--amber-bg);  border-color: var(--amber-brd);  color: var(--amber); }
-    .tl-hold .tl-dot   { background: var(--amber); }
-
-    /* ── Library tabs in expanded view ──────────────────────────── */
-    .lib-tabs {
-      display: flex; gap: 6px; flex-wrap: wrap;
-      border-bottom: 1px solid var(--border);
-      padding-bottom: .6rem; margin-bottom: .75rem;
-    }
-    .lib-tab {
-      font-family: var(--mono); font-size: .65rem; padding: 4px 12px;
-      border-radius: 99px; border: 1px solid var(--border2);
-      background: var(--bg4); color: var(--text3); cursor: pointer;
-      transition: all .12s;
-    }
-    .lib-tab:hover { border-color: var(--border3); color: var(--text); }
-    .lib-tab.active-lcpl   { background: var(--green-bg);  border-color: var(--green-brd);  color: var(--green); }
-    .lib-tab.active-broward{ background: var(--amber-bg);  border-color: var(--amber-brd);  color: var(--amber); }
-    .lib-panel { display: none; }
-    .lib-panel.visible { display: block; }
-
-    /* ── Broward availability summary ───────────────────────────── */
-    .broward-summary {
-      background: var(--bg4); border: 1px solid var(--border);
-      border-radius: var(--r-lg); padding: .85rem 1rem;
-      display: flex; align-items: center; gap: .85rem;
-    }
-    .broward-icon {
-      width: 36px; height: 36px; border-radius: 50%;
-      background: var(--amber-bg); border: 1px solid var(--amber-brd);
-      display: flex; align-items: center; justify-content: center;
-      font-size: 1rem; flex-shrink: 0;
-    }
-    .broward-info { flex: 1; }
-    .broward-name { font-family: var(--mono); font-size: .7rem; color: var(--text2); margin-bottom: 2px; }
-    .broward-status-avail { color: var(--green); font-family: var(--mono); font-size: .8rem; font-weight: 700; }
-    .broward-status-out   { color: var(--red);   font-family: var(--mono); font-size: .8rem; font-weight: 700; }
-
-    /* ── LCPL volume grid ───────────────────────────────────────── */
-    .vol-grid {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-      gap: 6px; margin-top: .5rem;
-    }
-    .vol-chip {
-      background: var(--bg4); border: 1px solid var(--border);
-      border-radius: var(--r); padding: .4rem .6rem; font-family: var(--mono); font-size: .65rem;
-    }
-    .vol-chip-num { color: var(--text3); margin-bottom: 3px; }
-    .vol-chip-branches { color: var(--text2); display: flex; flex-direction: column; gap: 2px; }
-
-    /* ── Card action buttons ────────────────────────────────────── */
-    .card-close-btn {
-      align-self: flex-start; font-family: var(--mono); font-size: .65rem;
-      color: var(--text3); background: none; border: 1px solid var(--border);
-      padding: 3px 8px; border-radius: var(--r); cursor: pointer; margin-top: auto;
-    }
-    .card-close-btn:hover { color: var(--text); border-color: var(--border2); background: var(--bg4); }
-    .lib-link-btn {
-      font-family: var(--mono); font-size: .65rem; color: var(--purple);
-      background: var(--purple-bg); border: 1px solid var(--purple-brd);
-      padding: 4px 12px; border-radius: var(--r); cursor: pointer;
-      text-decoration: none; display: inline-flex; align-items: center; gap: 4px;
-    }
-    .lib-link-btn:hover { color: var(--text); background: var(--bg4); }
-
-    /* Library badge on compact card */
-    .lib-badge-row { display: flex; gap: 4px; margin-top: .35rem; }
-    .lib-badge {
-      font-family: var(--mono); font-size: .58rem; padding: 1px 6px;
-      border-radius: 99px; border: 1px solid;
-    }
-    .lib-badge.lcpl    { background: var(--green-bg); border-color: var(--green-brd); color: var(--green); }
-    .lib-badge.broward { background: var(--amber-bg); border-color: var(--amber-brd); color: var(--amber); }
-
-    /* ── Sort/filter bar ────────────────────────────────────────── */
-    .results-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 1.25rem; flex-wrap: wrap; }
-    .results-count-big { font-family: var(--display); font-size: 1.4rem; font-weight: 700; }
-    .sort-btns { display: flex; gap: 4px; margin-left: auto; }
-    .sort-btn {
-      font-family: var(--mono); font-size: .65rem; padding: 4px 10px;
-      background: var(--bg3); border: 1px solid var(--border2); border-radius: 99px;
-      color: var(--text3); cursor: pointer; transition: all .1s;
-    }
-    .sort-btn:hover { border-color: var(--border3); color: var(--text); }
-    .sort-btn.active { background: var(--purple-bg); border-color: var(--purple-brd); color: var(--purple); }
-
-    /* ── Library filter pills ───────────────────────────────────── */
-    .lib-filter-row {
-      display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: .9rem;
-    }
-    .lib-filter-pill {
-      font-family: var(--mono); font-size: .68rem; padding: 5px 14px;
-      border-radius: 99px; border: 1px solid var(--border2);
-      background: var(--bg3); color: var(--text3); cursor: pointer;
-      transition: all .15s; text-decoration: none;
-    }
-    .lib-filter-pill:hover { border-color: var(--border3); color: var(--text); }
-    .lib-filter-pill.pill-all.active    { background: var(--purple-bg); border-color: var(--purple-brd); color: var(--purple); }
-    .lib-filter-pill.pill-lcpl.active   { background: var(--green-bg);  border-color: var(--green-brd);  color: var(--green); }
-    .lib-filter-pill.pill-broward.active{ background: var(--amber-bg);  border-color: var(--amber-brd);  color: var(--amber); }
-
-    /* ── Active filter chips ────────────────────────────────────── */
-    .filter-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 1rem; }
-    .fchip {
-      display: inline-flex; align-items: center; gap: 5px;
-      font-family: var(--mono); font-size: .63rem; padding: 3px 8px 3px 10px;
-      border-radius: 99px; background: var(--bg3); border: 1px solid var(--border2); color: var(--text2);
-    }
-    .fchip-x {
-      width: 14px; height: 14px; border-radius: 50%; background: var(--bg4);
-      display: flex; align-items: center; justify-content: center;
-      cursor: pointer; color: var(--text3); font-size: .6rem; line-height: 1; border: none; padding: 0;
-    }
-    .fchip-x:hover { background: var(--red-bg); color: var(--red); }
-
-    /* ── Empty state ────────────────────────────────────────────── */
-    .empty-state { text-align: center; padding: 4rem 2rem; max-width: 420px; margin: 0 auto; }
-    .empty-state-icon { font-size: 3rem; margin-bottom: 1rem; opacity: .4; }
-    .empty-state h2 { font-family: var(--display); font-size: 1.3rem; font-weight: 700; color: var(--text); margin-bottom: .5rem; }
-    .empty-state p { font-family: var(--mono); font-size: .75rem; color: var(--text3); margin-bottom: 1.5rem; line-height: 1.7; }
+    .back-link { font-family: var(--mono); font-size: .7rem; color: var(--text3); display: flex; align-items: center; gap: 5px; }
+    .back-link:hover { color: var(--purple); }
+    .sep { font-family: var(--mono); font-size: .6rem; color: var(--text3); opacity: .4; }
   </style>
 </head>
 <body>
 <div class="shell" style="position:relative;z-index:1">
 
-  <!-- ── Header ────────────────────────────────────────────────────── -->
-  <header style="padding:1.5rem 0 1rem;border-bottom:1px solid var(--border);margin-bottom:1.5rem;
-    display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
-    <a href="/" style="font-family:var(--mono);font-size:.7rem;color:var(--text3);display:flex;align-items:center;gap:5px">
-      ← Back to search
-    </a>
-    <span style="font-family:var(--mono);font-size:.6rem;color:var(--text3);opacity:.4">|</span>
+  <header class="page-header">
+    <a href="/" class="back-link">← Back to search</a>
+    <span class="sep">|</span>
     <span class="hero-eyebrow" style="margin:0">Search results</span>
   </header>
 
-  <!-- ── Results bar ───────────────────────────────────────────────── -->
+  <!-- ── Results bar ───────────────────────────────────────────── -->
   <div class="results-bar">
     <div class="results-count-big">{{ count }} title{{ 's' if count != 1 }}</div>
     <div class="sort-btns">
-      <button class="sort-btn active" onclick="sortCards('score', this)">Score</button>
-      <button class="sort-btn" onclick="sortCards('title', this)">A–Z</button>
-      <button class="sort-btn" onclick="sortCards('avail', this)">Available</button>
-      <button class="sort-btn" onclick="sortCards('vols', this)">Volumes</button>
+      <button class="sort-btn active" onclick="sortCards('score',this)">Score</button>
+      <button class="sort-btn" onclick="sortCards('title',this)">A–Z</button>
+      <button class="sort-btn" onclick="sortCards('avail',this)">Available</button>
+      <button class="sort-btn" onclick="sortCards('vols',this)">Volumes</button>
     </div>
   </div>
 
-  <!-- ── Library filter pills ──────────────────────────────────────── -->
+  <!-- ── Library filter pills ──────────────────────────────────── -->
   <div class="lib-filter-row" id="lib-filter-row">
     <a class="lib-filter-pill pill-all {{ 'active' if not filters.library }}" href="#" data-val="">All libraries</a>
     <a class="lib-filter-pill pill-lcpl {{ 'active' if filters.library == LCPL_LIBRARY_ID|string }}" href="#" data-val="{{ LCPL_LIBRARY_ID }}">🟢 Leon County (LCPL)</a>
     <a class="lib-filter-pill pill-broward {{ 'active' if filters.library == BROWARD_LIBRARY_ID|string }}" href="#" data-val="{{ BROWARD_LIBRARY_ID }}">🟡 Broward County (BCL)</a>
   </div>
 
-  <!-- ── Active filter chips ──────────────────────────────────────── -->
+  <!-- ── Active filter chips ──────────────────────────────────── -->
   {% if has_filters %}
-  <div class="filter-chips" id="filter-chips">
-    {% if filters.title %}
-    <div class="fchip">title: {{ filters.title }}<button class="fchip-x" onclick="removeFilter('title')">✕</button></div>
-    {% endif %}
-    {% if filters.type %}
-    <div class="fchip">type: {{ filters.type }}<button class="fchip-x" onclick="removeFilter('type')">✕</button></div>
-    {% endif %}
-    {% if filters.branch %}
-    <div class="fchip">branch: {{ filters.branch.split(' ')[0] }}<button class="fchip-x" onclick="removeFilter('branch')">✕</button></div>
-    {% endif %}
+  <div class="filter-chips">
+    {% if filters.title   %}<div class="fchip">title: {{ filters.title }}<button class="fchip-x" onclick="removeFilter('title')">✕</button></div>{% endif %}
+    {% if filters.type    %}<div class="fchip">type: {{ filters.type }}<button class="fchip-x" onclick="removeFilter('type')">✕</button></div>{% endif %}
+    {% if filters.branch  %}<div class="fchip">branch: {{ filters.branch.split(' ')[0] }}<button class="fchip-x" onclick="removeFilter('branch')">✕</button></div>{% endif %}
     {% if filters.library %}
     <div class="fchip {{ 'tl-avail' if filters.library == LCPL_LIBRARY_ID|string else 'tl-hold' }}">
       {{ 'LCPL' if filters.library == LCPL_LIBRARY_ID|string else 'Broward' }}
@@ -265,28 +64,28 @@
   </div>
   {% endif %}
 
-  <!-- ── Results grid ──────────────────────────────────────────────── -->
+  <!-- ── Results grid ──────────────────────────────────────────── -->
   {% if results %}
   <div class="results-grid" id="results-grid">
     {% for r in results %}
-    {% set lcpl_url = "https://lcpl.ent.sirsi.net/client/en_US/lcpl/search/results?qu=&qu=TITLE%3D" + r.Title|urlencode + "+&qu=AUTHOR%3D" + (r.author or '')|urlencode + "+&te=ILS&h=1" %}
-    {% set broward_url = "https://broward.ent.sirsi.net/client/en_US/default/search/results?qu=&qu=TITLE%3D" + r.Title|urlencode + "+&qu=AUTHOR%3D" + (r.author or '')|urlencode + "+&qf=FORMAT%09Special+Format%09BOOK%09Books&h=1" %}
+    {% set lcpl_url    = "https://lcpl.ent.sirsi.net/client/en_US/lcpl/search/results?qu=&qu=TITLE%3D" ~ r.Title|urlencode ~ "+&qu=AUTHOR%3D" ~ (r.author or '')|urlencode ~ "+&te=ILS&h=1" %}
+    {% set broward_url = "https://broward.ent.sirsi.net/client/en_US/default/search/results?qu=&qu=TITLE%3D" ~ r.Title|urlencode ~ "+&qu=AUTHOR%3D" ~ (r.author or '')|urlencode ~ "+&qf=FORMAT%09Special+Format%09BOOK%09Books&h=1" %}
 
     <div class="manga-card"
-      data-score="{{ r.Score or 0 }}"
-      data-title="{{ r.Title }}"
-      data-avail="{{ r.avail_count }}"
-      data-vols="{{ r.vol_count }}"
-      onclick="toggleCard(this)">
+         data-score="{{ r.Score or 0 }}"
+         data-title="{{ r.Title }}"
+         data-avail="{{ r.avail_count }}"
+         data-vols="{{ r.vol_count }}"
+         onclick="toggleCard(this)">
 
       <!-- Cover -->
       <div class="manga-cover" style="{{ r.MangaID | cover_gradient }}">
         {% if r.cover %}
         <img src="{{ r.cover }}" alt="{{ r.Title }}"
-             style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit;"
+             style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit"
              loading="lazy">
         {% else %}
-        <span class="cover-initial">{{ r.Title[0] | upper }}</span>
+        <span class="cover-initial">{{ r.Title[0]|upper }}</span>
         {% endif %}
         {% if r.Score %}<span class="cover-score">★ {{ r.Score }}</span>{% endif %}
       </div>
@@ -295,24 +94,21 @@
       <div class="manga-body">
         <div class="manga-card-title">{{ r.Title }}</div>
         <div class="manga-card-meta">
-          {{ r.Type }} · {{ r.vol_count }} vol{{ 's' if r.vol_count != 1 }}
-          {%- if r.Volumes %} of {{ r.Volumes }}{% endif %}
+          {{ r.Type }} · {{ r.vol_count }} vol{{ 's' if r.vol_count != 1 }}{% if r.Volumes %} of {{ r.Volumes }}{% endif %}
         </div>
         <div class="tl-row">
           {% if r.avail_count %}<span class="tl-chip tl-avail"><span class="tl-dot"></span>{{ r.avail_count }} available</span>{% endif %}
           {% if r.out_count   %}<span class="tl-chip tl-out"><span class="tl-dot"></span>{{ r.out_count }} out</span>{% endif %}
           {% if r.hold_count  %}<span class="tl-chip tl-hold"><span class="tl-dot"></span>{{ r.hold_count }} on hold</span>{% endif %}
         </div>
-        <!-- Library badges -->
         <div class="lib-badge-row">
           {% if r.has_lcpl    %}<span class="lib-badge lcpl">LCPL</span>{% endif %}
           {% if r.has_broward %}<span class="lib-badge broward">BCL</span>{% endif %}
         </div>
       </div>
 
-      <!-- ── Expanded body ────────────────────────────────────────── -->
+      <!-- Expanded body -->
       <div class="manga-body expanded-body" style="display:none">
-        <!-- Title / meta -->
         <div style="display:flex;align-items:baseline;gap:.75rem;flex-wrap:wrap;margin-bottom:.25rem">
           <div style="font-family:var(--display);font-size:1.1rem;font-weight:700">{{ r.Title }}</div>
           {% if r.Score %}<span class="score-val">★ {{ r.Score }}</span>{% endif %}
@@ -320,19 +116,17 @@
           {% if r.author %}<span style="font-family:var(--mono);font-size:.65rem;color:var(--text3)">by {{ r.author }}</span>{% endif %}
         </div>
 
-        <!-- Summary traffic-light -->
         <div class="tl-row" style="margin-bottom:.5rem">
           {% if r.avail_count %}<span class="tl-chip tl-avail"><span class="tl-dot"></span>{{ r.avail_count }} available</span>{% endif %}
           {% if r.out_count   %}<span class="tl-chip tl-out"><span class="tl-dot"></span>{{ r.out_count }} out</span>{% endif %}
           {% if r.hold_count  %}<span class="tl-chip tl-hold"><span class="tl-dot"></span>{{ r.hold_count }} on hold</span>{% endif %}
         </div>
 
-        <!-- ── Library tabs (only shown when both libraries present) ── -->
         {% if r.lib_list | length > 1 %}
         <div class="lib-tabs">
           {% for lib in r.lib_list %}
           {% set tab_cls = 'broward' if lib.library_id == BROWARD_LIBRARY_ID else 'lcpl' %}
-          <button class="lib-tab {{ 'active-' + tab_cls if loop.first }}"
+          <button class="lib-tab {{ 'active-' ~ tab_cls if loop.first }}"
                   onclick="event.stopPropagation();switchLibTab(this,'lib-panel-{{ r.MangaID }}-{{ lib.library_id }}')"
                   data-tabgroup="tabs-{{ r.MangaID }}">
             {{ lib.library_name }}
@@ -341,88 +135,81 @@
         </div>
         {% endif %}
 
-        <!-- ── Per-library panels ─────────────────────────────────── -->
         {% for lib in r.lib_list %}
         <div class="lib-panel {{ 'visible' if loop.first }}" id="lib-panel-{{ r.MangaID }}-{{ lib.library_id }}">
 
           {% if lib.library_id == BROWARD_LIBRARY_ID %}
-          <!-- Broward: title-level availability summary -->
-          {% for vd in lib.vol_list %}
-          <div class="broward-summary">
-            <div class="broward-icon">📚</div>
-            <div class="broward-info">
-              <div class="broward-name">Broward County Library System</div>
-              {% for b in vd.branches %}
-                {% if 'Checked Out' in b.status %}
-                <div class="broward-status-out">Checked Out system-wide</div>
-                {% elif 'On Hold' in b.status %}
-                <div class="broward-status-out">On Hold — no copies available</div>
-                {% else %}
-                <div class="broward-status-avail">Available — copies in system</div>
-                {% endif %}
-              {% else %}
-              <div style="font-family:var(--mono);font-size:.75rem;color:var(--text3)">No availability data</div>
-              {% endfor %}
-            </div>
-          </div>
-          {% else %}
-          <!-- No vol_list entries somehow -->
-          <div class="broward-summary">
-            <div class="broward-icon">📚</div>
-            <div class="broward-info">
-              <div class="broward-name">Broward County Library System</div>
-              <div style="font-family:var(--mono);font-size:.75rem;color:var(--text3)">No availability data scraped yet</div>
-            </div>
-          </div>
-          {% endfor %}
-
-          {% else %}
-          <!-- LCPL: per-volume per-branch grid -->
-          {% if lib.vol_list %}
-          <div class="section-label" style="margin-top:.25rem">Volumes at LCPL branches</div>
-          <div class="vol-grid">
             {% for vd in lib.vol_list %}
-            <div class="vol-chip">
-              <div class="vol-chip-num">Vol {{ vd.volume or '—' }}</div>
-              <div class="vol-chip-branches">
+            <div class="broward-summary">
+              <div class="broward-icon">📚</div>
+              <div class="broward-info">
+                <div class="broward-name">Broward County Library System</div>
                 {% for b in vd.branches %}
-                {% set s = b.status %}
-                {% set name = b.name %}
-                {% if 'Main' in name or 'Leroy' in name %}{% set short = 'Main' %}
-                {% elif 'Northeast' in name or 'Bruce' in name %}{% set short = 'NE' %}
-                {% elif 'Eastside' in name %}{% set short = 'Eastside' %}
-                {% elif 'Perry' in name or 'BL' in name %}{% set short = 'BL Perry' %}
-                {% elif 'Jackson' in name %}{% set short = 'Lk Jackson' %}
-                {% elif 'Braden' in name or 'Fort' in name %}{% set short = 'Ft Braden' %}
-                {% elif 'Woodville' in name %}{% set short = 'Woodville' %}
-                {% else %}{% set short = name.split(' ')[0] %}{% endif %}
-                <span style="font-size:.6rem;
-                  {% if 'Checked Out' in s %}color:var(--red)
-                  {% elif 'hold' in s.lower() %}color:var(--amber)
-                  {% elif s %}color:var(--green)
-                  {% else %}color:var(--text3){% endif %}">
-                  {{ short }}{% if 'Checked Out' in s %}: out{% elif 'hold' in s.lower() %}: hold{% endif %}
-                </span>
-                {% else %}<span style="color:var(--text3);font-size:.6rem">no data</span>
+                  {% if 'Checked Out' in b.status %}
+                  <div class="broward-status-out">Checked Out system-wide</div>
+                  {% elif 'On Hold' in b.status %}
+                  <div class="broward-status-out">On Hold — no copies available</div>
+                  {% else %}
+                  <div class="broward-status-avail">Available — copies in system</div>
+                  {% endif %}
+                {% else %}
+                <div style="font-family:var(--mono);font-size:.75rem;color:var(--text3)">No availability data</div>
                 {% endfor %}
               </div>
             </div>
+            {% else %}
+            <div class="broward-summary">
+              <div class="broward-icon">📚</div>
+              <div class="broward-info">
+                <div class="broward-name">Broward County Library System</div>
+                <div style="font-family:var(--mono);font-size:.75rem;color:var(--text3)">No availability data scraped yet</div>
+              </div>
+            </div>
             {% endfor %}
-          </div>
+
           {% else %}
-          <div style="font-family:var(--mono);font-size:.75rem;color:var(--text3);padding:.4rem 0">
-            No LCPL availability data scraped yet.
-          </div>
-          {% endif %}
+            {% if lib.vol_list %}
+            <div class="section-label" style="margin-top:.25rem">Volumes at LCPL branches</div>
+            <div class="vol-grid">
+              {% for vd in lib.vol_list %}
+              <div class="vol-chip">
+                <div class="vol-chip-num">Vol {{ vd.volume or '—' }}</div>
+                <div class="vol-chip-branches">
+                  {% for b in vd.branches %}
+                  {% set s = b.status %}
+                  {% set name = b.name %}
+                  {% if   'Main'     in name or 'Leroy'  in name %}{% set short = 'Main' %}
+                  {% elif 'Northeast' in name or 'Bruce'  in name %}{% set short = 'NE' %}
+                  {% elif 'Eastside'  in name %}{% set short = 'Eastside' %}
+                  {% elif 'Perry'     in name or 'BL'     in name %}{% set short = 'BL Perry' %}
+                  {% elif 'Jackson'   in name %}{% set short = 'Lk Jackson' %}
+                  {% elif 'Braden'    in name or 'Fort'   in name %}{% set short = 'Ft Braden' %}
+                  {% elif 'Woodville' in name %}{% set short = 'Woodville' %}
+                  {% else %}{% set short = name.split(' ')[0] %}{% endif %}
+                  <span style="font-size:.6rem;
+                    {% if 'Checked Out' in s %}color:var(--red)
+                    {% elif 'hold' in s.lower() %}color:var(--amber)
+                    {% elif s %}color:var(--green)
+                    {% else %}color:var(--text3){% endif %}">
+                    {{ short }}{% if 'Checked Out' in s %}: out{% elif 'hold' in s.lower() %}: hold{% endif %}
+                  </span>
+                  {% else %}<span style="color:var(--text3);font-size:.6rem">no data</span>
+                  {% endfor %}
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+            {% else %}
+            <div style="font-family:var(--mono);font-size:.75rem;color:var(--text3);padding:.4rem 0">No LCPL data scraped yet.</div>
+            {% endif %}
           {% endif %}
         </div>
         {% endfor %}
 
-        <!-- ── Action buttons ─────────────────────────────────────── -->
+        <!-- Action buttons -->
         <div style="display:flex;gap:8px;margin-top:1rem;align-items:center;flex-wrap:wrap">
           {% if r.has_lcpl %}
-          <a class="lib-link-btn" href="{{ lcpl_url }}" target="_blank" rel="noopener"
-             onclick="event.stopPropagation()">↗ Leon County Library</a>
+          <a class="lib-link-btn" href="{{ lcpl_url }}" target="_blank" rel="noopener" onclick="event.stopPropagation()">↗ Leon County Library</a>
           {% endif %}
           {% if r.has_broward %}
           <a class="lib-link-btn" href="{{ broward_url }}" target="_blank" rel="noopener"
@@ -431,13 +218,10 @@
           {% endif %}
           <a href="https://myanimelist.net/manga/{{ r.MangaID }}" target="_blank" rel="noopener"
              class="lib-link-btn" onclick="event.stopPropagation()">↗ MyAnimeList</a>
-          <button class="card-close-btn"
-                  onclick="event.stopPropagation();closeCard(this.closest('.manga-card'))">
-            ✕ Close
-          </button>
+          <button class="card-close-btn" onclick="event.stopPropagation();closeCard(this.closest('.manga-card'))">✕ Close</button>
         </div>
-      </div><!-- /expanded-body -->
-    </div><!-- /manga-card -->
+      </div>
+    </div>
     {% endfor %}
   </div>
 
@@ -450,26 +234,21 @@
     <div class="empty-state-icon">漫</div>
     <h2>No titles found</h2>
     <p>
-      {% if has_filters %}
-        Your filters didn't match anything in the collection.
-        Try broadening your search or clearing a filter.
-      {% else %}
-        No results returned. Try searching a title name.
-      {% endif %}
+      {% if has_filters %}Your filters didn't match anything. Try broadening your search or clearing a filter.
+      {% else %}No results returned. Try searching a title name.{% endif %}
     </p>
     <a href="/" class="btn primary" style="text-decoration:none;display:inline-flex">← Clear all filters</a>
   </div>
   {% endif %}
 
-  <div style="padding-top:1.5rem;display:flex;justify-content:space-between;align-items:center;
-    border-top:1px solid var(--border);margin-top:1.5rem">
+  <div style="padding-top:1.5rem;display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--border);margin-top:1.5rem">
     <span class="deco-jp">検索結果</span>
     <a class="back-link" href="/">← Return to search</a>
   </div>
 </div>
 
 <script>
-// ── Library filter pills ───────────────────────────────────────────
+// Library filter pills
 document.getElementById('lib-filter-row').addEventListener('click', e => {
   const pill = e.target.closest('.lib-filter-pill');
   if (!pill) return;
@@ -481,43 +260,35 @@ document.getElementById('lib-filter-row').addEventListener('click', e => {
   window.location.href = url.toString();
 });
 
-// ── Library tab switcher ───────────────────────────────────────────
+// Library tab switcher
 function switchLibTab(btn, panelId) {
   const card = btn.closest('.manga-card');
-  card.querySelectorAll('.lib-tab').forEach(t => {
-    t.className = t.className.replace(/\s*active-\S+/g, '');
-  });
+  card.querySelectorAll('.lib-tab').forEach(t => t.className = t.className.replace(/\s*active-\S+/g, ''));
   card.querySelectorAll('.lib-panel').forEach(p => p.classList.remove('visible'));
-  const isBroward = btn.textContent.includes('Broward');
-  btn.classList.add(isBroward ? 'active-broward' : 'active-lcpl');
-  const panel = document.getElementById(panelId);
-  if (panel) panel.classList.add('visible');
+  btn.classList.add(btn.textContent.includes('Broward') ? 'active-broward' : 'active-lcpl');
+  document.getElementById(panelId)?.classList.add('visible');
 }
 
-// ── Card toggle ────────────────────────────────────────────────────
+// Card expand/collapse
 function toggleCard(card) {
   if (card.classList.contains('open')) { closeCard(card); return; }
   document.querySelectorAll('.manga-card.open').forEach(closeCard);
   card.classList.add('open');
-  const bodies = card.querySelectorAll('.manga-body');
-  if (bodies.length >= 2) {
-    bodies[0].style.display = 'none';
-    bodies[1].style.display = 'flex';
-    bodies[1].style.flexDirection = 'column';
-  }
+  const [compact, expanded] = card.querySelectorAll('.manga-body');
+  compact.style.display  = 'none';
+  expanded.style.display = 'flex';
+  expanded.style.flexDirection = 'column';
   card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 function closeCard(card) {
   card.classList.remove('open');
-  const bodies = card.querySelectorAll('.manga-body');
-  if (bodies.length >= 2) {
-    bodies[0].style.display = '';
-    bodies[1].style.display = 'none';
-  }
+  const [compact, expanded] = card.querySelectorAll('.manga-body');
+  compact.style.display  = '';
+  expanded.style.display = 'none';
 }
 
-// ── Sort ───────────────────────────────────────────────────────────
+// Sort
 let sortDir = {};
 function sortCards(key, btn) {
   document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
@@ -526,8 +297,7 @@ function sortCards(key, btn) {
   const grid  = document.getElementById('results-grid');
   const cards = [...grid.querySelectorAll('.manga-card')];
   cards.sort((a, b) => {
-    const ka = key === 'score' ? 'score' : key === 'title' ? 'title' : key === 'avail' ? 'avail' : 'vols';
-    const va = a.dataset[ka], vb = b.dataset[ka];
+    const va = a.dataset[key], vb = b.dataset[key];
     const na = parseFloat(va), nb = parseFloat(vb);
     const dir = sortDir[key] ? 1 : -1;
     if (!isNaN(na) && !isNaN(nb)) return (na - nb) * dir;
@@ -536,7 +306,7 @@ function sortCards(key, btn) {
   cards.forEach(c => grid.appendChild(c));
 }
 
-// ── Filter removal ─────────────────────────────────────────────────
+// Remove filter
 function removeFilter(key) {
   const url = new URL(window.location.href);
   url.searchParams.delete(key);

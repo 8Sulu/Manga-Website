@@ -7,15 +7,14 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <style>
     .portal-hero {
-      min-height: 40vh;
-      display: flex; flex-direction: column;
+      min-height: 42vh; display: flex; flex-direction: column;
       align-items: center; justify-content: center;
-      text-align: center; padding: 4rem 1rem 2rem; position: relative;
+      text-align: center; padding: 4.5rem 1rem 2.5rem; position: relative;
     }
     .portal-eyebrow {
-      font-family: var(--mono); font-size: .6rem;
-      letter-spacing: .22em; text-transform: uppercase; color: var(--green);
-      margin-bottom: 1rem; display: flex; align-items: center; gap: 10px;
+      font-family: var(--mono); font-size: .6rem; letter-spacing: .22em;
+      text-transform: uppercase; color: var(--green); margin-bottom: 1rem;
+      display: flex; align-items: center; gap: 10px;
     }
     .portal-eyebrow::before, .portal-eyebrow::after {
       content: ''; display: inline-block; width: 32px; height: 1px; background: var(--green); opacity: .5;
@@ -25,19 +24,17 @@
       font-weight: 800; letter-spacing: -.04em; line-height: .95; margin-bottom: .6rem;
     }
     .portal-title .accent { color: var(--green); }
-    .portal-sub {
-      font-family: var(--mono); font-size: .72rem; color: var(--text3);
-      letter-spacing: .06em; margin-bottom: 2rem;
-    }
-    .portal-stats { display: flex; gap: 2rem; justify-content: center; margin-bottom: 3rem; }
+    .portal-sub { font-family: var(--mono); font-size: .72rem; color: var(--text3); letter-spacing: .06em; margin-bottom: 2rem; }
+
+    .portal-stats { display: flex; gap: 2.5rem; justify-content: center; margin-bottom: 2.5rem; }
     .pstat { text-align: center; }
     .pstat-val { font-family: var(--display); font-size: 1.6rem; font-weight: 700; color: var(--green); display: block; line-height: 1; }
     .pstat-lbl { font-family: var(--mono); font-size: .58rem; text-transform: uppercase; letter-spacing: .1em; color: var(--text3); margin-top: 3px; display: block; }
 
     /* ── Search box ──────────────────────────────────────── */
-    .search-wrap { width: 100%; max-width: 640px; margin: 0 auto; position: relative; }
+    .search-wrap { width: 100%; max-width: 600px; margin: 0 auto; position: relative; }
     .search-input-row {
-      display: flex; gap: 0; border-radius: var(--r-lg);
+      display: flex; border-radius: var(--r-lg);
       border: 1px solid var(--border2); background: var(--bg3); overflow: hidden;
       transition: border-color .15s, box-shadow .15s;
     }
@@ -46,10 +43,9 @@
       border: none; background: transparent; border-radius: 0;
       font-size: .95rem; padding: 14px 16px; flex: 1; min-width: 0;
     }
-    .search-input-row input[type="text"]:focus { box-shadow: none; }
+    .search-input-row input:focus { box-shadow: none; }
     .search-go-btn {
-      padding: 0 22px;
-      background: linear-gradient(135deg, var(--purple2), var(--purple));
+      padding: 0 22px; background: linear-gradient(135deg, var(--purple2), var(--purple));
       border: none; color: #fff; font-family: var(--mono); font-size: .75rem;
       letter-spacing: .06em; cursor: pointer; border-radius: 0; flex-shrink: 0; transition: opacity .15s;
     }
@@ -57,16 +53,13 @@
 
     /* ── Typeahead ───────────────────────────────────────── */
     .typeahead-dropdown {
-      position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+      position: absolute; top: calc(100% + 6px); left: 0; right: 0;
       background: var(--bg3); border: 1px solid var(--border2);
       border-radius: var(--r-lg); overflow: hidden;
-      box-shadow: 0 8px 32px rgba(0,0,0,.45); z-index: 100; display: none;
+      box-shadow: 0 8px 32px rgba(0,0,0,.5); z-index: 100; display: none;
     }
     .typeahead-dropdown.open { display: block; }
-    .ta-item {
-      display: flex; align-items: center; gap: 10px; padding: 10px 16px;
-      cursor: pointer; transition: background .1s; border-bottom: 1px solid var(--border);
-    }
+    .ta-item { display: flex; align-items: center; gap: 10px; padding: 10px 16px; cursor: pointer; transition: background .1s; border-bottom: 1px solid var(--border); }
     .ta-item:last-child { border-bottom: none; }
     .ta-item:hover, .ta-item.active { background: var(--bg4); }
     .ta-title { flex: 1; font-size: .84rem; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -76,19 +69,21 @@
     .ta-empty { padding: 14px 16px; font-family: var(--mono); font-size: .75rem; color: var(--text3); text-align: center; }
 
     /* ── Filter row ──────────────────────────────────────── */
-    .filter-row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 1rem; }
+    .filter-strip {
+      display: flex; flex-direction: column; gap: .75rem; margin-top: 1rem;
+      width: 100%; max-width: 600px;
+    }
+    .filter-selects { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
     .filter-select {
       padding: 6px 12px; font-family: var(--mono); font-size: .72rem;
       background: var(--bg3); border: 1px solid var(--border2); border-radius: 99px;
-      color: var(--text2); cursor: pointer; outline: none;
-      transition: border-color .15s, color .15s; -webkit-appearance: none;
+      color: var(--text2); cursor: pointer; outline: none; transition: border-color .15s, color .15s;
+      -webkit-appearance: none;
     }
     .filter-select:focus { border-color: var(--purple); color: var(--text); }
 
-    /* ── Availability + library pills ─────────────────────── */
-    .pill-row {
-      display: flex; gap: 6px; justify-content: center; margin-top: .6rem; flex-wrap: wrap;
-    }
+    /* ── Pill row ────────────────────────────────────────── */
+    .pill-row { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
     .pill-btn {
       font-family: var(--mono); font-size: .68rem; padding: 5px 14px; border-radius: 99px;
       border: 1px solid var(--border2); background: var(--bg3); color: var(--text3);
@@ -100,37 +95,25 @@
     .pill-btn.pill-all.active     { background: var(--purple-bg); border-color: var(--purple-brd); color: var(--purple); }
     .pill-btn.pill-lcpl.active    { background: var(--green-bg);  border-color: var(--green-brd);  color: var(--green); }
     .pill-btn.pill-broward.active { background: var(--amber-bg);  border-color: var(--amber-brd);  color: var(--amber); }
-    .pill-divider {
-      font-family: var(--mono); font-size: .6rem; color: var(--text3);
-      display: flex; align-items: center; padding: 0 2px; opacity: .4;
-    }
+    .pill-divider { font-family: var(--mono); font-size: .6rem; color: var(--text3); display: flex; align-items: center; padding: 0 2px; opacity: .4; }
 
-    /* ── Stats section ───────────────────────────────────── */
-    .stats-section { max-width: 760px; margin: 2rem auto 0; }
-    .grid-bg {
-      position: fixed; inset: 0;
-      background-image:
-        linear-gradient(rgba(255,255,255,.015) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255,255,255,.015) 1px, transparent 1px);
-      background-size: 40px 40px;
-      pointer-events: none; z-index: 0;
-    }
+    /* ── About card ──────────────────────────────────────── */
+    .about-card { max-width: 680px; margin: 2.5rem auto 0; }
   </style>
 </head>
 <body>
 <div class="grid-bg"></div>
 <div style="position:relative;z-index:1">
 
-  <!-- ── Portal hero ──────────────────────────────────────── -->
   <div class="portal-hero">
-    <div class="portal-eyebrow">Leon County &amp; Broward County Library Systems</div>
+    <div class="portal-eyebrow">Leon County &amp; Broward County Libraries</div>
     <h1 class="portal-title">Manga<span class="accent">.</span><br>Find It Here</h1>
-    <p class="portal-sub">漫画コレクション — Browse the full collection across both library systems</p>
+    <p class="portal-sub">漫画コレクション — search availability across both library systems</p>
 
     <div class="portal-stats">
       <div class="pstat">
         <span class="pstat-val" id="stat-volumes">—</span>
-        <span class="pstat-lbl">Entries</span>
+        <span class="pstat-lbl">Entries tracked</span>
       </div>
       <div class="pstat">
         <span class="pstat-val" id="stat-titles">—</span>
@@ -142,14 +125,13 @@
       </div>
     </div>
 
-    <!-- Search form -->
-    <form id="search-form" action="/search" method="get" style="width:100%;max-width:640px">
+    <form id="search-form" action="/search" method="get" style="width:100%;display:flex;flex-direction:column;align-items:center;gap:0">
       <div class="search-wrap">
         <div class="search-input-row">
           <input type="text" name="title" id="search-input"
-                 placeholder="Search by title… e.g. Naruto, Berserk"
+                 placeholder="Search title… e.g. Berserk, Frieren"
                  autocomplete="off" spellcheck="false">
-          <button type="submit" class="search-go-btn">SEARCH</button>
+          <button type="submit" class="search-go-btn">Search</button>
         </div>
         <div class="typeahead-dropdown" id="typeahead"></div>
         <input type="hidden" name="type"    id="f-type">
@@ -158,61 +140,55 @@
         <input type="hidden" name="library" id="f-library">
       </div>
 
-      <!-- Type/branch filters -->
-      <div class="filter-row" style="margin-top:1rem">
-        <select class="filter-select" id="sel-type" onchange="document.getElementById('f-type').value=this.value">
-          <option value="">All types</option>
-          <option>Manga</option>
-          <option value="Light-Novel">Light Novel</option>
-          <option>Novel</option>
-          <option>Manhwa</option>
-          <option>Manhua</option>
-        </select>
+      <div class="filter-strip">
+        <div class="filter-selects">
+          <select class="filter-select" id="sel-type" onchange="document.getElementById('f-type').value=this.value">
+            <option value="">All types</option>
+            <option>Manga</option>
+            <option value="Light-Novel">Light Novel</option>
+            <option>Novel</option>
+            <option>Manhwa</option>
+            <option>Manhua</option>
+          </select>
+          <select class="filter-select" id="sel-branch" onchange="document.getElementById('f-branch').value=this.value">
+            <option value="">All branches</option>
+            <optgroup label="Leon County (LCPL)">
+              <option value="Leroy Collins Leon County Main Public Library">Main — Leroy Collins</option>
+              <option value="Bruce J. Host Northeast Branch Library">Northeast — Bruce</option>
+              <option value="Lake Jackson Branch Library">Lake Jackson</option>
+              <option value="Eastside Branch Library">Eastside</option>
+              <option value="Dr BL Perry Jr Branch Library">Dr BL Perry</option>
+              <option value="Woodville Branch Library">Woodville</option>
+              <option value="Jane G. Sauls Fort Braden Branch Library">Fort Braden</option>
+            </optgroup>
+          </select>
+        </div>
 
-        <select class="filter-select" id="sel-branch" onchange="document.getElementById('f-branch').value=this.value">
-          <option value="">All branches</option>
-          <optgroup label="Leon County (LCPL)">
-            <option value="Leroy Collins Leon County Main Public Library">Main — Leroy Collins</option>
-            <option value="Bruce J. Host Northeast Branch Library">Northeast — Bruce</option>
-            <option value="Lake Jackson Branch Library">Lake Jackson</option>
-            <option value="Eastside Branch Library">Eastside</option>
-            <option value="Dr BL Perry Jr Branch Library">Dr BL Perry</option>
-            <option value="Woodville Branch Library">Woodville</option>
-            <option value="Jane G. Sauls Fort Braden Branch Library">Fort Braden</option>
-          </optgroup>
-        </select>
-      </div>
-
-      <!-- Availability pills -->
-      <div class="pill-row" id="avail-pills">
-        <a class="pill-btn pill-all active"  href="#" data-group="avail" data-val="">All statuses</a>
-        <a class="pill-btn pill-avail"       href="#" data-group="avail" data-val="available">🟢 Available</a>
-        <a class="pill-btn pill-out"         href="#" data-group="avail" data-val="out">🔴 Checked out</a>
-        <span class="pill-divider">|</span>
-        <a class="pill-btn pill-all active"  href="#" data-group="library" data-val="">Both libraries</a>
-        <a class="pill-btn pill-lcpl"        href="#" data-group="library" data-val="1">🟢 Leon County</a>
-        <a class="pill-btn pill-broward"     href="#" data-group="library" data-val="15">🟡 Broward</a>
+        <div class="pill-row" id="avail-pills">
+          <a class="pill-btn pill-all active" href="#" data-group="avail" data-val="">Any status</a>
+          <a class="pill-btn pill-avail"      href="#" data-group="avail" data-val="available">🟢 Available now</a>
+          <a class="pill-btn pill-out"        href="#" data-group="avail" data-val="out">🔴 Checked out</a>
+          <span class="pill-divider">|</span>
+          <a class="pill-btn pill-all active" href="#" data-group="library" data-val="">Both libraries</a>
+          <a class="pill-btn pill-lcpl"       href="#" data-group="library" data-val="1">🟢 Leon County</a>
+          <a class="pill-btn pill-broward"    href="#" data-group="library" data-val="15">🟡 Broward</a>
+        </div>
       </div>
     </form>
   </div>
 
-  <!-- ── Stats section ─────────────────────────────────────── -->
-  <div class="shell stats-section" style="padding-bottom:5rem">
+  <div class="shell about-card" style="padding-bottom:5rem">
     <div class="card">
       <div class="section-label">About the collection</div>
-      <div id="about-wrap">
-        <p style="font-family:var(--mono);font-size:.78rem;color:var(--text2);line-height:1.8">
-          This tracker covers manga available at both the
-          <strong style="color:var(--green)">Leon County Public Library</strong> (7 branches, full per-volume tracking)
-          and the
-          <strong style="color:var(--amber)">Broward County Library</strong> (title-level availability).
-          Use the library filter above or on the results page to focus on one system.
-        </p>
-        <p style="font-family:var(--mono);font-size:.78rem;color:var(--text2);line-height:1.8;margin-top:.75rem">
-          Full branch breakdown and pipeline controls available on the
-          <a href="/admin" style="color:var(--purple)">Admin Dashboard</a>.
-        </p>
-      </div>
+      <p style="font-family:var(--mono);font-size:.78rem;color:var(--text2);line-height:1.8">
+        Tracks manga across <strong style="color:var(--green)">Leon County Public Library</strong> (7 branches · per-volume status)
+        and <strong style="color:var(--amber)">Broward County Library</strong> (title-level availability).
+        Data sourced from MyAnimeList rankings and each library's catalog API.
+      </p>
+      <p style="font-family:var(--mono);font-size:.78rem;color:var(--text2);line-height:1.8;margin-top:.75rem">
+        Pipeline controls and collection management live on the
+        <a href="/admin" style="color:var(--purple)">Admin Dashboard</a>.
+      </p>
     </div>
 
     <div style="padding-top:1rem;display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--border)">
@@ -224,7 +200,6 @@
 </div>
 
 <script>
-// ── Stats ──────────────────────────────────────────────────
 async function loadStats() {
   try {
     const d = await fetch('/api/stats').then(r => r.json());
@@ -234,15 +209,14 @@ async function loadStats() {
 }
 loadStats();
 
-// ── Typeahead ──────────────────────────────────────────────
-const input    = document.getElementById('search-input');
+// ── Typeahead ──────────────────────────────────────────────────
+const input = document.getElementById('search-input');
 const dropdown = document.getElementById('typeahead');
 let debounce, activeIdx = -1, lastQuery = '';
 
 function highlight(text, query) {
   if (!query) return text;
-  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return text.replace(new RegExp(`(${escaped})`, 'gi'), '<em>$1</em>');
+  return text.replace(new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'), '<em>$1</em>');
 }
 
 async function fetchSuggestions(q) {
@@ -259,7 +233,8 @@ function renderDropdown(items, q) {
   activeIdx = -1;
   if (!items.length) {
     dropdown.innerHTML = `<div class="ta-empty">No results for "${q}"</div>`;
-    dropdown.classList.add('open'); return;
+    dropdown.classList.add('open');
+    return;
   }
   dropdown.innerHTML = items.map((item, i) => `
     <div class="ta-item" data-title="${item.title.replace(/"/g, '&quot;')}" data-idx="${i}">
@@ -268,25 +243,23 @@ function renderDropdown(items, q) {
       ${item.score ? `<span class="ta-score">★ ${parseFloat(item.score).toFixed(2)}</span>` : ''}
     </div>`).join('');
   dropdown.classList.add('open');
-  dropdown.querySelectorAll('.ta-item').forEach(el => {
-    el.addEventListener('mousedown', e => { e.preventDefault(); navigateTo(el.dataset.title); });
-  });
+  dropdown.querySelectorAll('.ta-item').forEach(el =>
+    el.addEventListener('mousedown', e => { e.preventDefault(); navigateTo(el.dataset.title); }));
 }
 
 function closeDropdown() { dropdown.classList.remove('open'); activeIdx = -1; }
 
 function navigateTo(title) {
-  const params = new URLSearchParams();
-  params.set('title', title);
+  const p = new URLSearchParams({ title });
   const typeVal    = document.getElementById('sel-type').value;
   const branchVal  = document.getElementById('sel-branch').value;
   const availVal   = document.getElementById('f-avail').value;
   const libraryVal = document.getElementById('f-library').value;
-  if (typeVal)    params.set('type',    typeVal);
-  if (branchVal)  params.set('branch',  branchVal);
-  if (availVal)   params.set('avail',   availVal);
-  if (libraryVal) params.set('library', libraryVal);
-  window.location.href = '/search?' + params.toString();
+  if (typeVal)    p.set('type',    typeVal);
+  if (branchVal)  p.set('branch',  branchVal);
+  if (availVal)   p.set('avail',   availVal);
+  if (libraryVal) p.set('library', libraryVal);
+  window.location.href = '/search?' + p.toString();
 }
 
 input.addEventListener('input', () => {
@@ -296,24 +269,22 @@ input.addEventListener('input', () => {
 input.addEventListener('keydown', e => {
   const items = dropdown.querySelectorAll('.ta-item');
   if (!dropdown.classList.contains('open')) return;
-  if (e.key === 'ArrowDown') { e.preventDefault(); activeIdx = Math.min(activeIdx + 1, items.length - 1); items.forEach((el, i) => el.classList.toggle('active', i === activeIdx)); }
-  else if (e.key === 'ArrowUp')  { e.preventDefault(); activeIdx = Math.max(activeIdx - 1, -1); items.forEach((el, i) => el.classList.toggle('active', i === activeIdx)); }
+  if (e.key === 'ArrowDown')  { e.preventDefault(); activeIdx = Math.min(activeIdx + 1, items.length - 1); items.forEach((el, i) => el.classList.toggle('active', i === activeIdx)); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); activeIdx = Math.max(activeIdx - 1, -1); items.forEach((el, i) => el.classList.toggle('active', i === activeIdx)); }
   else if (e.key === 'Enter' && activeIdx >= 0) { e.preventDefault(); navigateTo(items[activeIdx].dataset.title); }
   else if (e.key === 'Escape') closeDropdown();
 });
 document.addEventListener('click', e => { if (!e.target.closest('.search-wrap')) closeDropdown(); });
 
-// ── Pill toggles (availability + library — independent groups) ──────
+// ── Pill toggles ───────────────────────────────────────────────
 document.getElementById('avail-pills').addEventListener('click', e => {
   const pill = e.target.closest('.pill-btn');
   if (!pill || !pill.dataset.group) return;
   e.preventDefault();
   const group = pill.dataset.group;
-  // Deactivate all in this group
   document.querySelectorAll(`.pill-btn[data-group="${group}"]`).forEach(p => p.classList.remove('active'));
   pill.classList.add('active');
-  if (group === 'avail')   document.getElementById('f-avail').value   = pill.dataset.val;
-  if (group === 'library') document.getElementById('f-library').value = pill.dataset.val;
+  document.getElementById(group === 'avail' ? 'f-avail' : 'f-library').value = pill.dataset.val;
 });
 </script>
 </body>

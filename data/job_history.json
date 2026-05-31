@@ -238,5 +238,23 @@
     "status": "done",
     "message": "inserted 0 LCPL availability rows",
     "at": "2026-05-30T04:36:11.276076"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 0 LCPL availability rows",
+    "at": "2026-05-30T23:04:22.247327"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 0 LCPL availability rows",
+    "at": "2026-05-30T23:06:41.859207"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-05-30T23:14:49.875323"
   }
 ]
