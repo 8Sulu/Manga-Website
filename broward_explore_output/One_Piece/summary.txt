@@ -1,6 +1,0 @@
-
-[SUMMARY] Search returned 12 item IDs: ['782916', '176101', '233689', '793107', '233913', '59386', '127224', '125668', '233908', '271511']
-[*] Probing first 3 items in detail…
-  [item 782916] availability probe ok
-  [item 176101] availability probe ok
-  [item 233689] availability probe ok

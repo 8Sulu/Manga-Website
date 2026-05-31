@@ -125,7 +125,6 @@ def _titles_count() -> int:
         return 9999
 
 def _missing_indices(library_pattern: str) -> list:
-    """Return 1-based indices of manga missing availability data for the given library."""
     try:
         manga_ids = [r['MangaID'] for r in execute_query("SELECT MangaID FROM manga ORDER BY MangaID")]
         scraped = {r['MangaID'] for r in execute_query(f"""
@@ -162,6 +161,64 @@ def _get_library_ids() -> tuple[int, int]:
     except Exception:
         pass
     return 1, 15
+
+# ── Branch display helpers ─────────────────────────────────────────────────────
+
+def _branch_short(name: str, library_id: int, broward_library_id: int) -> str:
+    """Compact display name for any branch."""
+    if library_id != broward_library_id:
+        if 'Main'      in name or 'Leroy'  in name: return 'Main'
+        if 'Northeast' in name or 'Bruce'  in name: return 'NE Branch'
+        if 'Eastside'  in name:                      return 'Eastside'
+        if 'Perry'     in name or 'BL'     in name: return 'BL Perry'
+        if 'Jackson'   in name:                      return 'Lk Jackson'
+        if 'Braden'    in name or 'Fort'   in name: return 'Ft Braden'
+        if 'Woodville' in name:                      return 'Woodville'
+        return name.split(' ')[0]
+    # Broward
+    if name == 'Main Library':                       return 'Main'
+    if 'Northwest Regional' in name:                 return 'NW Regional'
+    if 'North Regional'     in name:                 return 'N Regional'
+    if 'South Regional'     in name:                 return 'S Regional'
+    if 'Southwest Regional' in name:                 return 'SW Regional'
+    if 'West Regional'      in name:                 return 'W Regional'
+    if 'African American'   in name:                 return 'AARLCC'
+    if 'Hollywood Beach'    in name:                 return 'Hollywood Bch'
+    if 'Hollywood'          in name:                 return 'Hollywood'
+    if 'Lauderhill Central' in name:                 return 'Lauderhill CP'
+    if 'Lauderhill Towne'   in name:                 return 'Lauderhill TC'
+    if 'Lauderdale Lakes'   in name:                 return 'Laud. Lakes'
+    if 'Pompano Beach'      in name:                 return 'Pompano Bch'
+    if 'Pembroke Pines'     in name:                 return 'Pemb. Pines'
+    if 'Miramar'            in name:                 return 'Miramar'
+    if 'Weston'             in name:                 return 'Weston'
+    if 'Tamarac'            in name:                 return 'Tamarac'
+    if 'Sunrise'            in name:                 return 'Sunrise'
+    if 'Margate'            in name:                 return 'Margate'
+    if 'Deerfield Beach'    in name:                 return 'Deerfield Bch'
+    if 'Dania Beach'        in name:                 return 'Dania Bch'
+    if 'Hallandale'         in name:                 return 'Hallandale'
+    if 'Carver Ranches'     in name:                 return 'Carver Ranch'
+    if 'Century Plaza'      in name:                 return 'Century Plz'
+    if 'North Lauderdale'   in name:                 return 'N. Laud.'
+    if 'Imperial Point'     in name:                 return 'Imperial Pt'
+    if 'Riverland'          in name:                 return 'Riverland'
+    if 'Davie'              in name:                 return 'Davie/CC'
+    if 'Beach Branch'       in name:                 return 'Beach'
+    if 'Jan Moran'          in name:                 return 'Jan Moran'
+    if 'Galt Ocean'         in name:                 return 'Galt Ocean'
+    if 'Fort Lauderdale Reading' in name:            return 'FTL Reading'
+    if 'Tyrone Bryant'      in name:                 return 'Tyrone Bryant'
+    if 'Northwest Branch'   in name:                 return 'NW Branch'
+    if 'Nova Southeastern'  in name:                 return 'NSU'
+    return name.split(' ')[0]
+
+def _status_priority(status: str) -> int:
+    """Higher = prefer this status when a branch has multiple rows."""
+    if 'Available' in status:                      return 2
+    if any(kw in status for kw in ('Collection', 'Youth', 'Graphic', 'Materials', 'General')): return 2
+    if 'Hold' in status or 'hold' in status.lower(): return 1
+    return 0
 
 # ── DB schema & seed ───────────────────────────────────────────────────────────
 
@@ -256,7 +313,7 @@ def admin():
         JOIN branch_availability_status bas ON b.BranchID = bas.BranchID
         JOIN availability a ON bas.AvailabilityID = a.AvailabilityID
         GROUP BY l.LibraryName, b.BranchName
-        HAVING COUNT(DISTINCT CONCAT(a.MangaID,'-',a.Volume)) > 10
+        HAVING COUNT(DISTINCT CONCAT(a.MangaID,'-',a.Volume)) > 0
         ORDER BY l.LibraryName, VolumeCount DESC
     """)
     return render_template('admin.html',
@@ -424,7 +481,6 @@ def api_missing_titles():
 @app.route('/api/title_index')
 @admin_required
 def api_title_index():
-    """Return the 1-based scrape index for a title (used by re-scrape feature)."""
     title = request.args.get('title', '').strip()
     if not title:
         return jsonify({'ok': False, 'message': 'No title provided'}), 400
@@ -476,7 +532,8 @@ def api_title_volumes(manga_id):
 
 # ── Search ─────────────────────────────────────────────────────────────────────
 
-ON_SHELF = ('Graphic Novel', 'Youth Fiction', 'Adult Non-Fiction', 'Available')
+ON_SHELF = ('Graphic Novel', 'Youth Fiction', 'Adult Non-Fiction', 'Available',
+            'General Collection', 'New Materials')
 
 @app.route('/search')
 def search():
@@ -488,7 +545,6 @@ def search():
     avail_filter = request.args.get('avail',   '')
     lib_filter   = request.args.get('library', '')
 
-    # Build query with parameterized filters
     conditions = ['b.BranchName IS NOT NULL']
     params = []
     if title:      conditions.append('m.Title LIKE %s');     params.append(f'%{title}%')
@@ -515,7 +571,7 @@ def search():
     if avail_filter == 'available':
         rows = [r for r in rows if any(kw in (r.get('Status') or '') for kw in ON_SHELF)]
 
-    # Group by title
+    # Group by title → library → branch (best status per branch)
     titles_map: dict = {}
     for r in rows:
         t = r['Title']
@@ -524,46 +580,70 @@ def search():
                 'MangaID': r['MangaID'], 'Title': t, 'Volumes': r['Volumes'],
                 'Type': r['Type'], 'Members': r['Members'], 'Score': r['Score'],
                 'author': r.get('Author') or '', 'cover': r.get('CoverMedium') or '',
-                'volumes': {}, 'has_lcpl': False, 'has_broward': False,
+                'lib_data': {},
+                'has_lcpl': False, 'has_broward': False,
             }
-        vol = r['Volume']
-        lid = r.get('LibraryID')
-        titles_map[t]['volumes'].setdefault(vol, []).append(
-            {'name': r['BranchName'], 'status': r.get('Status') or '', 'lib_id': lid})
-        if lid == BROWARD_LIBRARY_ID: titles_map[t]['has_broward'] = True
-        elif lid == LCPL_LIBRARY_ID:  titles_map[t]['has_lcpl'] = True
+        lid    = r.get('LibraryID')
+        bname  = r['BranchName']
+        status = r.get('Status') or ''
+        vol    = r['Volume']
+
+        td = titles_map[t]
+        td['lib_data'].setdefault(lid, {
+            'library_id':   lid,
+            'library_name': ('Broward County Library' if lid == BROWARD_LIBRARY_ID
+                             else 'Leon County Public Library'),
+            'branches': {},
+        })
+        ld = td['lib_data'][lid]
+
+        # Keep highest-priority status per branch
+        existing = ld['branches'].get(bname)
+        if existing is None or _status_priority(status) > _status_priority(existing['status']):
+            ld['branches'][bname] = {
+                'name':   bname,
+                'short':  _branch_short(bname, lid, BROWARD_LIBRARY_ID),
+                'status': status,
+            }
+
+        if lid == BROWARD_LIBRARY_ID: td['has_broward'] = True
+        elif lid == LCPL_LIBRARY_ID:  td['has_lcpl']    = True
 
     grouped = []
     for td in titles_map.values():
-        lib_data: dict = {}
         avail_count = out_count = hold_count = 0
-        for vol, branches in td['volumes'].items():
-            for b in branches:
-                lid = b['lib_id']
-                lib_data.setdefault(lid, {
-                    'library_id': lid,
-                    'library_name': ('Broward County Library' if lid == BROWARD_LIBRARY_ID
-                                     else 'Leon County Public Library'),
-                    'vol_map': {},
-                })
-                lib_data[lid]['vol_map'].setdefault(vol, []).append(
-                    {'name': b['name'], 'status': b['status']})
+        lib_list = []
+
+        for linfo in sorted(td['lib_data'].values(), key=lambda x: x['library_id']):
+            branch_list = sorted(linfo['branches'].values(), key=lambda x: x['name'])
+            for b in branch_list:
                 s = b['status']
-                if 'Checked Out' in s: out_count   += 1
-                elif 'hold' in s.lower(): hold_count += 1
-                elif s:                avail_count  += 1
+                if any(kw in s for kw in ON_SHELF): avail_count += 1
+                elif 'hold' in s.lower():           hold_count  += 1
+                elif s:                             out_count   += 1
+            lib_list.append({
+                'library_id':   linfo['library_id'],
+                'library_name': linfo['library_name'],
+                'branch_list':  branch_list,
+            })
 
-        lib_list = sorted([{
-            'library_id':   linfo['library_id'],
-            'library_name': linfo['library_name'],
-            'vol_list': [{'volume': v, 'branches': brs}
-                         for v, brs in sorted(linfo['vol_map'].items(),
-                                              key=lambda x: (x[0] is None, x[0]))],
-        } for linfo in lib_data.values()], key=lambda x: x['library_id'])
-
-        grouped.append({**td, 'lib_list': lib_list, 'vol_count': len(td['volumes']),
-                        'avail_count': avail_count, 'out_count': out_count,
-                        'hold_count': hold_count})
+        grouped.append({
+            'MangaID':     td['MangaID'],
+            'Title':       td['Title'],
+            'Volumes':     td['Volumes'],
+            'Type':        td['Type'],
+            'Members':     td['Members'],
+            'Score':       td['Score'],
+            'author':      td['author'],
+            'cover':       td['cover'],
+            'has_lcpl':    td['has_lcpl'],
+            'has_broward': td['has_broward'],
+            'lib_list':    lib_list,
+            'vol_count':   len(td['lib_data']),   # number of libraries with data
+            'avail_count': avail_count,
+            'out_count':   out_count,
+            'hold_count':  hold_count,
+        })
 
     filters = {'title': title, 'type': type_, 'branch': branch,
                'volume': volume, 'avail': avail_filter, 'library': lib_filter}

@@ -6,7 +6,6 @@
   <title>Search Results — Manga Tracker</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <style>
-    /* ── Results page extras ──────────────────────────────── */
     .page-header {
       padding: 1.25rem 0 1rem; border-bottom: 1px solid var(--border); margin-bottom: 1.5rem;
       display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
@@ -136,73 +135,37 @@
         {% endif %}
 
         {% for lib in r.lib_list %}
+        {% set is_broward = lib.library_id == BROWARD_LIBRARY_ID %}
         <div class="lib-panel {{ 'visible' if loop.first }}" id="lib-panel-{{ r.MangaID }}-{{ lib.library_id }}">
 
-          {% if lib.library_id == BROWARD_LIBRARY_ID %}
-            {% for vd in lib.vol_list %}
-            <div class="broward-summary">
-              <div class="broward-icon">📚</div>
-              <div class="broward-info">
-                <div class="broward-name">Broward County Library System</div>
-                {% for b in vd.branches %}
-                  {% if 'Checked Out' in b.status %}
-                  <div class="broward-status-out">Checked Out system-wide</div>
-                  {% elif 'On Hold' in b.status %}
-                  <div class="broward-status-out">On Hold — no copies available</div>
-                  {% else %}
-                  <div class="broward-status-avail">Available — copies in system</div>
-                  {% endif %}
-                {% else %}
-                <div style="font-family:var(--mono);font-size:.75rem;color:var(--text3)">No availability data</div>
-                {% endfor %}
-              </div>
+          {% if lib.branch_list %}
+            <div class="section-label" style="margin-top:.25rem">
+              Branches — {{ 'Broward County' if is_broward else 'Leon County' }}
             </div>
-            {% else %}
-            <div class="broward-summary">
-              <div class="broward-icon">📚</div>
-              <div class="broward-info">
-                <div class="broward-name">Broward County Library System</div>
-                <div style="font-family:var(--mono);font-size:.75rem;color:var(--text3)">No availability data scraped yet</div>
-              </div>
-            </div>
-            {% endfor %}
-
-          {% else %}
-            {% if lib.vol_list %}
-            <div class="section-label" style="margin-top:.25rem">Volumes at LCPL branches</div>
-            <div class="vol-grid">
-              {% for vd in lib.vol_list %}
-              <div class="vol-chip">
-                <div class="vol-chip-num">Vol {{ vd.volume or '—' }}</div>
-                <div class="vol-chip-branches">
-                  {% for b in vd.branches %}
-                  {% set s = b.status %}
-                  {% set name = b.name %}
-                  {% if   'Main'     in name or 'Leroy'  in name %}{% set short = 'Main' %}
-                  {% elif 'Northeast' in name or 'Bruce'  in name %}{% set short = 'NE' %}
-                  {% elif 'Eastside'  in name %}{% set short = 'Eastside' %}
-                  {% elif 'Perry'     in name or 'BL'     in name %}{% set short = 'BL Perry' %}
-                  {% elif 'Jackson'   in name %}{% set short = 'Lk Jackson' %}
-                  {% elif 'Braden'    in name or 'Fort'   in name %}{% set short = 'Ft Braden' %}
-                  {% elif 'Woodville' in name %}{% set short = 'Woodville' %}
-                  {% else %}{% set short = name.split(' ')[0] %}{% endif %}
-                  <span style="font-size:.6rem;
-                    {% if 'Checked Out' in s %}color:var(--red)
-                    {% elif 'hold' in s.lower() %}color:var(--amber)
-                    {% elif s %}color:var(--green)
-                    {% else %}color:var(--text3){% endif %}">
-                    {{ short }}{% if 'Checked Out' in s %}: out{% elif 'hold' in s.lower() %}: hold{% endif %}
-                  </span>
-                  {% else %}<span style="color:var(--text3);font-size:.6rem">no data</span>
-                  {% endfor %}
-                </div>
+            <div class="branch-avail-grid">
+              {% for b in lib.branch_list %}
+              {% set s = b.status %}
+              <div class="branch-avail-row">
+                <span class="branch-avail-name"
+                      title="{{ b.name }}">{{ b.short }}</span>
+                <span class="branch-avail-status
+                  {% if 'Available' in s %} status-avail
+                  {% elif 'Hold' in s %}    status-hold
+                  {% else %}               status-out
+                  {% endif %}">
+                  {% if 'Available' in s %}Available
+                  {% elif 'Hold' in s %}On Hold
+                  {% else %}Checked Out{% endif %}
+                </span>
               </div>
               {% endfor %}
             </div>
-            {% else %}
-            <div style="font-family:var(--mono);font-size:.75rem;color:var(--text3);padding:.4rem 0">No LCPL data scraped yet.</div>
-            {% endif %}
+          {% else %}
+            <div style="font-family:var(--mono);font-size:.75rem;color:var(--text3);padding:.4rem 0">
+              No availability data scraped yet.
+            </div>
           {% endif %}
+
         </div>
         {% endfor %}
 
@@ -248,7 +211,6 @@
 </div>
 
 <script>
-// Library filter pills
 document.getElementById('lib-filter-row').addEventListener('click', e => {
   const pill = e.target.closest('.lib-filter-pill');
   if (!pill) return;
@@ -260,7 +222,6 @@ document.getElementById('lib-filter-row').addEventListener('click', e => {
   window.location.href = url.toString();
 });
 
-// Library tab switcher
 function switchLibTab(btn, panelId) {
   const card = btn.closest('.manga-card');
   card.querySelectorAll('.lib-tab').forEach(t => t.className = t.className.replace(/\s*active-\S+/g, ''));
@@ -269,7 +230,6 @@ function switchLibTab(btn, panelId) {
   document.getElementById(panelId)?.classList.add('visible');
 }
 
-// Card expand/collapse
 function toggleCard(card) {
   if (card.classList.contains('open')) { closeCard(card); return; }
   document.querySelectorAll('.manga-card.open').forEach(closeCard);
@@ -288,7 +248,6 @@ function closeCard(card) {
   expanded.style.display = 'none';
 }
 
-// Sort
 let sortDir = {};
 function sortCards(key, btn) {
   document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
@@ -306,7 +265,6 @@ function sortCards(key, btn) {
   cards.forEach(c => grid.appendChild(c));
 }
 
-// Remove filter
 function removeFilter(key) {
   const url = new URL(window.location.href);
   url.searchParams.delete(key);

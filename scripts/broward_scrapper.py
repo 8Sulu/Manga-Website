@@ -1,28 +1,33 @@
 """
-Broward County Library manga scraper.
+Broward County Library manga scraper — per-branch edition.
+
+Uses the SirsiDynix `lookuptitleinfo` endpoint which returns per-copy,
+per-branch JSON:
+  {"childRecords": [{"LIBRARY": "Main Library", "SD_ITEM_STATUS": "General Collection"}, ...]}
+
+Each branch gets its own branch_availability_status row (same as LCPL).
 
 Usage:
-    python new_broward_scrapper.py                     scrape all titles
-    python new_broward_scrapper.py --line 3            scrape line 3
-    python new_broward_scrapper.py --range 1-50        scrape lines 1 to 50
-    python new_broward_scrapper.py --indices 1,4,7     scrape specific 1-based indices
-    python new_broward_scrapper.py --output file.csv   also write a CSV (debug/audit)
-    python new_broward_scrapper.py --debug             verbose URL/field logging
+    python broward_scrapper.py                     scrape all titles
+    python broward_scrapper.py --line 3            scrape line 3
+    python broward_scrapper.py --range 1-50        scrape lines 1 to 50
+    python broward_scrapper.py --indices 1,4,7     scrape specific 1-based indices
+    python broward_scrapper.py --output file.csv   also write a CSV (debug/audit)
+    python broward_scrapper.py --debug             verbose URL/field logging
 """
 from __future__ import annotations
 
-import os
-import re
 import csv
-import json
 import time
 import argparse
 import logging
+import re
 import sys
+import urllib.parse
+from collections import defaultdict
 from pathlib import Path
 
 import requests
-import urllib.parse
 
 sys.path.append(str(Path(__file__).parent.parent))
 from config.settings import DATA_DIR, DB_CONFIG
@@ -30,15 +35,29 @@ from config.settings import DATA_DIR, DB_CONFIG
 log = logging.getLogger(__name__)
 
 BASE_URL = "https://broward.ent.sirsi.net"
+CLIENT   = "/client/en_US/default"
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "text/javascript, text/html, application/json, */*",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+    "User-Agent":       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/124.0.0.0 Safari/537.36",
+    "Accept":           "text/javascript, text/html, application/json, */*",
+    "Accept-Language":  "en-US,en;q=0.9",
+    "Content-Type":     "application/x-www-form-urlencoded; charset=UTF-8",
     "X-Requested-With": "XMLHttpRequest",
-    "Origin": BASE_URL,
+    "Origin":           BASE_URL,
 }
+
+# SD_ITEM_STATUS values meaning the item is physically on the shelf
+ON_SHELF_STATUSES = {
+    "general collection",
+    "new materials",
+    "reference",
+    "graphic novels",
+    "young adult",
+    "children",
+}
+
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
 
@@ -46,49 +65,60 @@ def _get_db():
     import mysql.connector
     return mysql.connector.connect(**DB_CONFIG)
 
-def _load_title_author_map() -> list[tuple[int, str, str, int]]:
-    """Return list of (1-based-index, title, author, manga_id) from the manga DB table."""
-    conn = _get_db()
-    cursor = conn.cursor(dictionary=True)
-    cursor.execute("SELECT MangaID, Title, Author FROM manga ORDER BY MangaID")
-    rows = cursor.fetchall()
-    cursor.close()
-    conn.close()
-    return [(i + 1, r['Title'], r['Author'] or '', r['MangaID']) for i, r in enumerate(rows)]
 
-def _get_broward_branch_id() -> int:
+def _load_title_author_map() -> list[tuple[int, str, str, int]]:
     conn = _get_db()
-    cursor = conn.cursor(dictionary=True)
-    cursor.execute(
-        "SELECT b.BranchID FROM branch b "
+    cur  = conn.cursor(dictionary=True)
+    cur.execute("SELECT MangaID, Title, Author FROM manga ORDER BY MangaID")
+    rows = cur.fetchall()
+    cur.close(); conn.close()
+    return [(i + 1, r["Title"], r["Author"] or "", r["MangaID"]) for i, r in enumerate(rows)]
+
+
+def _load_broward_branch_map() -> dict[str, int]:
+    """Return {branch_name: BranchID} for all Broward branches."""
+    conn = _get_db()
+    cur  = conn.cursor(dictionary=True)
+    cur.execute(
+        "SELECT b.BranchID, b.BranchName FROM branch b "
         "JOIN library l ON b.LibraryID = l.LibraryID "
-        "WHERE l.LibraryName LIKE %s LIMIT 1",
+        "WHERE l.LibraryName LIKE %s",
         ("%Broward%",),
     )
-    row = cursor.fetchone()
-    cursor.close()
-    conn.close()
-    if not row:
+    rows = cur.fetchall()
+    cur.close(); conn.close()
+    if not rows:
         raise RuntimeError(
-            "No Broward branch found in the database. "
-            "Make sure libraries.csv / branches.csv include a Broward entry and run DB reset."
+            "No Broward branches found in the database. "
+            "Run a DB reset to seed libraries.csv / branches.csv first."
         )
-    return int(row["BranchID"])
+    mapping = {r["BranchName"]: r["BranchID"] for r in rows}
+    log.info(f"Loaded {len(mapping)} Broward branch(es) from DB")
+    return mapping
 
-def _upsert_broward_results(cursor, manga_id: int, broward_branch_id: int, results: list[dict]) -> str:
-    """Requires an active cursor passed from the main loop."""
-    if not results:
-        return "no results to store"
 
+def _upsert_broward_results(cursor, manga_id: int, broward_library_id: int,
+                             branch_statuses: list[dict]) -> str:
+    """
+    branch_statuses: [{"branch_id": int, "status": str}, ...]
+
+    Deletes all existing Broward availability rows for this manga_id,
+    then inserts one availability row + one branch_availability_status row
+    per branch that has at least one copy.
+    """
+    if not branch_statuses:
+        return "no branch data to store"
+
+    # Delete old Broward rows for this title
     cursor.execute(
         """
         DELETE bas FROM branch_availability_status bas
-        JOIN availability a ON bas.AvailabilityID = a.AvailabilityID
-        WHERE a.MangaID = %s AND bas.BranchID = %s
+        JOIN availability a  ON bas.AvailabilityID = a.AvailabilityID
+        JOIN branch b        ON bas.BranchID = b.BranchID
+        WHERE a.MangaID = %s AND b.LibraryID = %s
         """,
-        (manga_id, broward_branch_id),
+        (manga_id, broward_library_id),
     )
-
     cursor.execute(
         """
         DELETE a FROM availability a
@@ -99,315 +129,282 @@ def _upsert_broward_results(cursor, manga_id: int, broward_branch_id: int, resul
     )
 
     inserted = 0
-    for item in results:
-        available     = int(item.get("available", 0))
-        total_copies  = int(item.get("total_copies", 0))
-        holds         = int(item.get("holds", 0))
-
-        if available > 0:
-            status = "Available"
-        elif holds > 0:
-            status = "On Hold"
-        else:
-            status = "Checked Out"
-
-        cursor.execute("INSERT INTO availability (MangaID, Volume) VALUES (%s, %s)", (manga_id, 0))
-        avail_id = cursor.lastrowid
-
+    # One availability row per branch (volume=0 for Broward, no volume breakdown)
+    for bs in branch_statuses:
         cursor.execute(
-            "INSERT INTO branch_availability_status (AvailabilityID, BranchID, `Status`) VALUES (%s, %s, %s)",
-            (avail_id, broward_branch_id, status),
+            "INSERT INTO availability (MangaID, Volume) VALUES (%s, %s)",
+            (manga_id, 0),
+        )
+        cursor.execute(
+            "INSERT INTO branch_availability_status "
+            "(AvailabilityID, BranchID, `Status`) VALUES (%s, %s, %s)",
+            (cursor.lastrowid, bs["branch_id"], bs["status"]),
         )
         inserted += 1
 
-    return f"inserted {inserted} Broward availability row(s)"
+    return f"inserted {inserted} branch row(s)"
+
 
 # ── Scraping logic ────────────────────────────────────────────────────────────
 
 def get_search_results(session: requests.Session, title: str, author: str,
-                       is_debug: bool) -> list[str]:
-    encoded_title  = urllib.parse.quote_plus(title)
-    encoded_author = urllib.parse.quote_plus(author)
-    base_search_url = (
-        f"{BASE_URL}/client/en_US/default/search/results"
-        f"?qu=&qu=TITLE%3D{encoded_title}+&qu=AUTHOR%3D{encoded_author}+"
+                       debug: bool) -> list[str]:
+    """Return de-duplicated SD_ILS item IDs for this title/author."""
+    et = urllib.parse.quote_plus(title)
+    ea = urllib.parse.quote_plus(author)
+    base_url = (
+        f"{BASE_URL}{CLIENT}/search/results"
+        f"?qu=&qu=TITLE%3D{et}+&qu=AUTHOR%3D{ea}+"
         f"&qf=FORMAT%09Special+Format%09BOOK%09Books"
     )
-
-    all_item_ids: list[str] = []
-    offset   = 0
-    page_num = 1
-
-    if is_debug:
-        print(f"\n[*] Searching for: '{title}' by {author}...")
-    else:
-        print(f"\n[*] '{title}' (by {author})")
-        print("-" * 50)
-
+    all_ids: list[str] = []; seen: set[str] = set()
+    offset = 0; page = 1
+    log.info(f"  Searching: '{title}' by {author}")
     while True:
-        search_url = (
-            f"{base_search_url}&h=1"
-            if offset == 0
-            else f"{base_search_url}&rw={offset}&isd=true&h=1"
-        )
-        if is_debug:
-            print(f"[DEBUG] Visited Page {page_num} URL: {search_url}")
+        url = base_url + ("&h=1" if offset == 0 else f"&rw={offset}&isd=true&h=1")
+        if debug: print(f"[DEBUG] search page {page}: {url}")
         try:
-            response = session.get(search_url, headers=HEADERS, timeout=15)
-            if response.status_code != 200:
-                if is_debug:
-                    print(f"[-] Search failed on page {page_num}: Status {response.status_code}")
-                break
-
-            matches          = re.findall(r"SD_ILS:(\d+)", response.text)
-            current_page_ids = list(dict.fromkeys(matches))
-            new_ids          = [uid for uid in current_page_ids if uid not in all_item_ids]
-
-            if not new_ids:
-                if is_debug:
-                    print(f"[*] No new results on page {page_num}. Ending pagination.")
-                break
-
-            all_item_ids.extend(new_ids)
-
-            if len(current_page_ids) < 12:
-                break
-
-            offset   += 12
-            page_num += 1
-            time.sleep(1)
-
+            r = session.get(url, headers=HEADERS, timeout=15)
+            if r.status_code != 200: break
+            matches = re.findall(r"SD_ILS:(\d+)", r.text)
+            new_ids = [m for m in dict.fromkeys(matches) if m not in seen]
+            if not new_ids: break
+            all_ids.extend(new_ids); seen.update(new_ids)
+            if len(matches) < 12: break
+            offset += 12; page += 1; time.sleep(0.8)
         except Exception as e:
-            print(f"[!] Search connection error on page {page_num}: {e}")
-            break
-
-    if is_debug:
-        print(f"[+] Total unique Item IDs found: {len(all_item_ids)}")
-    elif not all_item_ids:
-        print(" [-] No results found in the catalog.")
-
-    return all_item_ids
+            log.warning(f"  Search error: {e}"); break
+    log.info(f"  Found {len(all_ids)} catalog item(s)")
+    return all_ids
 
 
-def fetch_availability(session: requests.Session, item_id: str, index: int,
-                       total: int, base_title: str,
-                       is_debug: bool) -> dict | None:
-    INIT_URL = (
-        f"{BASE_URL}/client/en_US/default/search/results"
-        f".displaypanel.displaycell_0:detailclick"
-        f"/ent:$002f$002fSD_ILS$002f0$002fSD_ILS:{item_id}/1/1"
-        f"/tabDISCOVERY_ALLlistItem"
-    )
-    AVAILABILITY_URL = (
-        f"{BASE_URL}/client/en_US/default/search/results"
-        f".displaypanel.displaycell_0.detail.detailavailabilityaccordions"
-        f".boundwithzone:lookupavailability"
-        f"/ent:$002f$002fSD_ILS$002f0$002fSD_ILS:{item_id}/ILS/1/false"
-        f"/LIBRARY$002cCALLNUMBER"
-    )
+def fetch_item_copies(session: requests.Session, item_id: str,
+                      title: str, author: str, debug: bool) -> list[dict]:
+    """
+    Two-step fetch:
+      1. POST detailclick      → primes session, extracts sdcsrf token
+      2. POST lookuptitleinfo  → {"childRecords": [{"LIBRARY":…, "SD_ITEM_STATUS":…}]}
 
+    Returns [{"library": str, "status": str, "on_shelf": bool}, ...]
+    """
+    et = urllib.parse.quote_plus(title)
+    ea = urllib.parse.quote_plus(author)
+    ei = urllib.parse.quote_plus(f"ent://SD_ILS/0/SD_ILS:{item_id}~ILS~0")
+    qs = (f"qu=TITLE%3D{et}&qu=AUTHOR%3D{ea}"
+          f"&qf=FORMAT%09Special+Format%09BOOK%09Books&d={ei}&h=3")
+
+    payload = {
+        "qu":  [f"TITLE%3D{et}", f"AUTHOR%3D{ea}"],
+        "qf":  "FORMAT\tSpecial Format\tBOOK\tBooks",
+        "d":   f"ent://SD_ILS/0/SD_ILS:{item_id}~ILS~0",
+        "h":   "3",
+    }
     session.headers.update({
-        "Referer": f"{BASE_URL}/client/en_US/default/search/results"
-                   f"?qu={urllib.parse.quote_plus(base_title)}"
+        "Referer": f"{BASE_URL}{CLIENT}/search/results?qu=TITLE%3D{et}"
     })
 
-    if is_debug:
-        print(f"\n[*] Processing Item {index}/{total} (ID: {item_id})")
-        print(f"[DEBUG] Visited INIT URL: {INIT_URL}")
-
-    init_params = {
-        "qu":  base_title,
-        "qf":  "ITYPE\tMaterial Type\t1:BOOK\tBook",
-        "d":   f"ent://SD_ILS/0/SD_ILS:{item_id}~ILS~1",
-        "h":   "8",
-    }
-
+    # Step 1 — detailclick
+    detail_url = (
+        f"{BASE_URL}{CLIENT}/search/results"
+        f".displaypanel.displaycell_0:detailclick"
+        f"/ent:$002f$002fSD_ILS$002f0$002fSD_ILS:{item_id}/0/0"
+        f"/tabDISCOVERY_ALLlistItem?{qs}"
+    )
+    if debug: print(f"[DEBUG] detailclick: {detail_url}")
     try:
-        response_1 = session.post(INIT_URL, data=init_params, timeout=15)
-        if response_1.status_code != 200:
-            if is_debug:
-                print(f"[-] Step 1 failed: Status {response_1.status_code}")
-            return None
-
-        specific_title = base_title
-        title_match = re.search(
-            r'class="[^"]*TITLE[^"]*">([^<]+)<', response_1.text, re.IGNORECASE
-        )
-        if title_match:
-            specific_title = title_match.group(1).replace("&#x20;", " ").strip()
-
-        sdcsrf_match = re.search(r"sdcsrf=([a-f0-9\-]+)", response_1.text)
-        sdcsrf_token = session.cookies.get("sdcsrf") # Safely grab from cookies first
-        
-        if sdcsrf_match:
-            sdcsrf_token = sdcsrf_match.group(1)
-            
-        if not sdcsrf_token:
-            if is_debug:
-                print("[-] Critical: Could not locate 'sdcsrf' token.")
-            return None
-
-        session.headers.update({"sdcsrf": sdcsrf_token})
-
-        if is_debug:
-            print(f"[DEBUG] Visited AVAIL URL: {AVAILABILITY_URL}")
-
-        avail_payload = {
-            "qu":      base_title,
-            "qf":      "ITYPE\tMaterial Type\t1:BOOK\tBook",
-            "d":       f"ent://SD_ILS/0/SD_ILS:{item_id}~ILS~1",
-            "h":       "8",
-            "sdcsrf":  sdcsrf_token,
-        }
-
-        response_2 = session.post(AVAILABILITY_URL, data=avail_payload, timeout=15)
-        if response_2.status_code != 200:
-            if is_debug:
-                print(f"[-] Step 2 failed: Status {response_2.status_code}")
-            return None
-
-        data        = response_2.json()
-        eval_script = data["inits"][0]["evalScript"][0]
-        json_match  = re.search(r"updateWebServiceFields\((.*?)\);", eval_script)
-
-        if json_match:
-            meta         = json.loads(json_match.group(1))
-            available    = meta.get("availableCount", "0")
-            total_copies = meta.get("copyCount", "0")
-            holds        = meta.get("holdCount", "0")
-
-            if is_debug:
-                print(f"[+] '{specific_title}' — avail={available}/{total_copies} holds={holds}")
-            else:
-                indicator = "[✓]" if int(available) > 0 else "[X]"
-                print(f"  {indicator} {specific_title} — Available: {available}/{total_copies} | Holds: {holds}")
-
-            return {
-                "volume_title":  specific_title,
-                "available":     available,
-                "total_copies":  total_copies,
-                "holds":         holds,
-            }
-
+        r1 = session.post(detail_url, data=payload, timeout=15)
+        if r1.status_code != 200:
+            log.warning(f"  detailclick {item_id} → {r1.status_code}"); return []
+        sdcsrf = session.cookies.get("sdcsrf")
+        m = re.search(r"sdcsrf=([a-f0-9\-]+)", r1.text)
+        if m: sdcsrf = m.group(1)
+        if not sdcsrf:
+            log.warning(f"  No sdcsrf for {item_id}"); return []
+        session.headers.update({"sdcsrf": sdcsrf})
     except Exception as e:
-        if is_debug:
-            print(f"[-] Parsing failed: {e}")
-    return None
+        log.warning(f"  detailclick error {item_id}: {e}"); return []
+
+    # Step 2 — lookuptitleinfo
+    info_url = (
+        f"{BASE_URL}{CLIENT}/search/results"
+        f".displaypanel.displaycell_0.detail.detailavailabilityaccordions"
+        f":lookuptitleinfo"
+        f"/ent:$002f$002fSD_ILS$002f0$002fSD_ILS:{item_id}/ILS/0/true/true?{qs}"
+    )
+    if debug: print(f"[DEBUG] lookuptitleinfo: {info_url}")
+    try:
+        r2 = session.post(info_url, data={**payload, "sdcsrf": sdcsrf}, timeout=15)
+        if r2.status_code != 200:
+            log.warning(f"  lookuptitleinfo {item_id} → {r2.status_code}"); return []
+
+        records = r2.json().get("childRecords", [])
+        copies = []
+        for rec in records:
+            library    = (rec.get("LIBRARY")        or "").strip()
+            raw_status = (rec.get("SD_ITEM_STATUS") or "").strip()
+            on_shelf   = raw_status.lower() in ON_SHELF_STATUSES
+            copies.append({"library": library, "status": raw_status, "on_shelf": on_shelf})
+
+        if debug:
+            print(f"[DEBUG] item {item_id}: {len(copies)} copies")
+            for c in copies:
+                print(f"  [{'✓' if c['on_shelf'] else '✗'}] {c['library']} — {c['status']}")
+        return copies
+    except Exception as e:
+        log.warning(f"  lookuptitleinfo error {item_id}: {e}"); return []
+
+
+def copies_to_branch_statuses(all_copies: list[dict],
+                               branch_map: dict[str, int],
+                               debug: bool) -> list[dict]:
+    """
+    Aggregate all per-copy records across all items for a title.
+    For each branch that has at least one copy, emit one status:
+      - "Available"   if any copy is on-shelf
+      - "On Hold"     if no copy on-shelf but at least one hold (status contains "hold")
+      - "Checked Out" otherwise
+
+    Returns [{"branch_id": int, "branch_name": str, "status": str}, ...]
+    """
+    # Group copies by branch name
+    by_branch: dict[str, list[dict]] = defaultdict(list)
+    for c in all_copies:
+        by_branch[c["library"]].append(c)
+
+    result = []
+    unmatched = []
+    for branch_name, copies in by_branch.items():
+        branch_id = branch_map.get(branch_name)
+        if branch_id is None:
+            unmatched.append(branch_name)
+            continue
+
+        if any(c["on_shelf"] for c in copies):
+            status = "Available"
+        elif any("hold" in c["status"].lower() for c in copies):
+            status = "On Hold"
+        else:
+            status = "Checked Out"
+
+        result.append({"branch_id": branch_id, "branch_name": branch_name, "status": status})
+
+    if unmatched:
+        log.warning(f"  Unmatched branch names (not in DB): {unmatched}")
+        if debug:
+            print(f"[DEBUG] unmatched branches: {unmatched}")
+
+    return result
+
 
 # ── Main processing ───────────────────────────────────────────────────────────
 
 def process_batch(args: argparse.Namespace) -> None:
-    logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO,
-                        format="%(levelname)s %(message)s")
+    logging.basicConfig(
+        level=logging.DEBUG if args.debug else logging.INFO,
+        format="%(levelname)s %(message)s",
+    )
 
     all_pairs = _load_title_author_map()
-    if not all_pairs:
-        print("[-] No titles found in DB.")
-        return
+    if not all_pairs: print("[-] No titles found in DB."); return
 
-    # ── Resolve which 1-based indices to process ──────────────────────────────
-    if args.indices:
-        indices = args.indices
-    elif args.line:
-        indices = [args.line]
+    try:
+        branch_map = _load_broward_branch_map()
+    except RuntimeError as e:
+        print(f"[-] {e}"); return
+
+    # Resolve which LibraryID is Broward (needed for safe delete)
+    conn = _get_db()
+    cur  = conn.cursor(dictionary=True)
+    cur.execute("SELECT LibraryID FROM library WHERE LibraryName LIKE %s LIMIT 1", ("%Broward%",))
+    lib_row = cur.fetchone()
+    cur.close(); conn.close()
+    if not lib_row:
+        print("[-] Broward library not found in DB."); return
+    broward_library_id = lib_row["LibraryID"]
+
+    # Resolve index list
+    if args.indices:        indices = args.indices
+    elif args.line:         indices = [args.line]
     elif args.range:
         try:
-            parts = args.range.split("-")
-            start = max(1, int(parts[0]))
-            end   = int(parts[1])
-            indices = list(range(start, end + 1))
+            s, e = args.range.split("-")
+            indices = list(range(max(1, int(s)), int(e) + 1))
         except (ValueError, IndexError):
-            print("[-] Invalid --range format. Use START-END (e.g. --range 1-50)")
-            return
+            print("[-] Invalid --range. Use START-END (e.g. --range 1-50)"); return
     else:
         indices = list(range(1, len(all_pairs) + 1))
 
-    pairs_to_scrape = []
-    for idx in indices:
-        if 1 <= idx <= len(all_pairs):
-            pairs_to_scrape.append(all_pairs[idx - 1])
-        else:
-            log.warning(f"Index {idx} out of range — skipping")
+    pairs = [all_pairs[i - 1] for i in indices if 1 <= i <= len(all_pairs)]
+    if not pairs: print("[-] No valid titles."); return
 
-    if not pairs_to_scrape:
-        print("[-] No valid titles to scrape.")
-        return
+    print(f"[*] Broward library ID : {broward_library_id}")
+    print(f"[*] Broward branch count: {len(branch_map)}")
+    print(f"[*] Scraping {len(pairs)} title(s)…\n")
 
-    # ── Resolve Broward branch ID once ───────────────────────────────────────
-    try:
-        broward_branch_id = _get_broward_branch_id()
-    except RuntimeError as e:
-        print(f"[-] {e}")
-        return
-
-    print(f"[*] Broward branch ID: {broward_branch_id}")
-    print(f"[*] Scraping {len(pairs_to_scrape)} title(s)…\n")
-
-    # ── Set up optional CSV output ────────────────────────────────────────────
-    csv_file = None
-    csv_writer = None
+    # Optional CSV
+    csv_file = csv_writer = None
     if args.output:
         out_path = Path(args.output)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         csv_file   = open(out_path, "w", newline="", encoding="utf-8")
         csv_writer = csv.writer(csv_file)
-        csv_writer.writerow([
-            "Search Title", "Author", "Volume Title",
-            "Available", "Total Copies", "Holds", "In Stock",
-        ])
-        print(f"[*] Saving CSV to: {out_path}\n")
+        csv_writer.writerow(["Title", "Author", "ItemID", "Library", "Status", "OnShelf"])
+        print(f"[*] CSV → {out_path}\n")
 
-    # ── Scrape ────────────────────────────────────────────────────────────────
-    conn = _get_db()
-    cursor = conn.cursor()
+    db_conn = _get_db()
+    cursor  = db_conn.cursor()
     session = requests.Session()
-    session.headers.update(HEADERS)
+    session.get(f"{BASE_URL}{CLIENT}", timeout=20)   # prime cookies
+    session.headers.update({**HEADERS, "Referer": f"{BASE_URL}{CLIENT}"})
 
-    for progress, (idx, title, author, manga_id) in enumerate(pairs_to_scrape, start=1):
+    for progress, (idx, title, author, manga_id) in enumerate(pairs, start=1):
         if not author:
-            log.warning(f"Index {idx} '{title}' has no author — skipping")
-            continue
-            
-        print(f"[{progress}/{len(pairs_to_scrape)}] {title}", flush=True)
+            log.warning(f"Index {idx} '{title}' — no author, skipping"); continue
+        print(f"[{progress}/{len(pairs)}] {title}", flush=True)
 
         item_ids = get_search_results(session, title, author, args.debug)
+        if not item_ids:
+            print("  [-] No catalog entries found"); continue
 
-        title_results: list[dict] = []
-        total_items = len(item_ids)
+        all_copies: list[dict] = []
+        for item_id in item_ids:
+            copies = fetch_item_copies(session, item_id, title, author, args.debug)
+            all_copies.extend(copies)
+            if csv_writer:
+                for c in copies:
+                    csv_writer.writerow([title, author, item_id, c["library"],
+                                         c["status"], "Yes" if c["on_shelf"] else "No"])
+            time.sleep(1.2)
 
-        for i, item_id in enumerate(item_ids, start=1):
-            result = fetch_availability(session, item_id, i, total_items,
-                                        title, args.debug)
-            if result:
-                title_results.append(result)
-                if csv_writer:
-                    in_stock = "Yes" if int(result["available"]) > 0 else "No"
-                    csv_writer.writerow([
-                        title, author, result["volume_title"],
-                        result["available"], result["total_copies"],
-                        result["holds"], in_stock,
-                    ])
-            time.sleep(1.5)
+        # Aggregate to one status per branch
+        branch_statuses = copies_to_branch_statuses(all_copies, branch_map, args.debug)
 
-        # ── Write to DB ───────────────────────────────────────────────────────
-        if title_results:
+        avail_branches = sum(1 for b in branch_statuses if b["status"] == "Available")
+        total_branches = len(branch_statuses)
+        total_copies   = len(all_copies)
+        print(f"  [{'✓' if avail_branches else '✗'}] "
+              f"{avail_branches}/{total_branches} branches available "
+              f"({total_copies} total copies)")
+
+        if args.debug:
+            for b in branch_statuses:
+                mark = "✓" if b["status"] == "Available" else ("~" if b["status"] == "On Hold" else "✗")
+                print(f"  [{mark}] {b['branch_name']} — {b['status']}")
+
+        if branch_statuses:
             try:
-                msg = _upsert_broward_results(cursor, manga_id, broward_branch_id, title_results)
-                conn.commit()  # Commit after each title is successfully processed
+                msg = _upsert_broward_results(cursor, manga_id, broward_library_id, branch_statuses)
+                db_conn.commit()
                 print(f"  [DB] {msg}")
             except Exception as e:
-                conn.rollback()
-                print(f"  [DB] Error saving '{title}': {e}")
+                db_conn.rollback(); print(f"  [DB] Error: {e}")
         else:
-            print(f"  [--] No results to store for '{title}'")
+            print("  [--] No matched branches to store")
 
-    cursor.close()
-    conn.close()
-
-    if csv_file:
-        csv_file.close()
-
+    cursor.close(); db_conn.close()
+    if csv_file: csv_file.close()
     print("\n[*] Done.")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -415,19 +412,13 @@ if __name__ == "__main__":
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("--debug",   action="store_true",
-                        help="Print visited URLs and detailed availability tables")
-    parser.add_argument("--output",  type=str,
-                        help="Also save results to a CSV file (e.g. --output data/broward.csv)")
-
+    parser.add_argument("--debug",  action="store_true",
+                        help="Print visited URLs and per-copy details")
+    parser.add_argument("--output", type=str,
+                        help="Also save results to CSV")
     group = parser.add_mutually_exclusive_group()
-    group.add_argument("--line",    type=int,
-                       help="Scrape a single 1-based line number (e.g. --line 3)")
-    group.add_argument("--range",   type=str,
-                       help="Scrape a range of lines (e.g. --range 1-50)")
+    group.add_argument("--line",    type=int,   help="Single 1-based index (e.g. --line 3)")
+    group.add_argument("--range",   type=str,   help="Range (e.g. --range 1-50)")
     group.add_argument("--indices", type=lambda s: [int(x) for x in s.split(",")],
-                       metavar="N,N,…",
-                       help="Scrape specific comma-separated 1-based indices (e.g. --indices 1,4,7)")
-
-    args = parser.parse_args()
-    process_batch(args)
+                       metavar="N,N,…", help="Comma-separated 1-based indices")
+    process_batch(parser.parse_args())
