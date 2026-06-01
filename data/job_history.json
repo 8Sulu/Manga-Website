@@ -394,5 +394,29 @@
     "status": "done",
     "message": "[*] Done.",
     "at": "2026-06-01T20:56:28.794654+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-01T21:46:09.848459+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "error",
+    "message": "WARNING   detailclick 727373 → 403",
+    "at": "2026-06-01T21:47:47.603182+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-01T22:04:24.666956+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-01T22:11:11.848768+00:00"
   }
 ]
