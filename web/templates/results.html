@@ -15,14 +15,6 @@
     .sep { font-family: var(--mono); font-size: .6rem; color: var(--text3); opacity: .4; }
 
     /* ── Volume grid (shared by LCPL + Broward) ─── */
-    .vol-section { margin-bottom: .5rem; }
-    .vol-section-label {
-      font-family: var(--mono); font-size: .58rem; letter-spacing: .12em;
-      text-transform: uppercase; color: var(--text3); margin-bottom: .4rem;
-      display: flex; align-items: center; gap: 8px;
-    }
-    .vol-section-label::after { content:''; flex:1; height:1px; background:var(--border); }
-
     .vol-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px,1fr)); gap: 5px; }
     .vol-chip {
       background: var(--bg4); border: 1px solid var(--border); border-radius: var(--r);
@@ -75,10 +67,14 @@
   </div>
 
   <!-- ── Library filter pills ──────────────────────────────────── -->
+  {# FIX: Use actual DB IDs from backend — never hardcode #}
   <div class="lib-filter-row" id="lib-filter-row">
-    <a class="lib-filter-pill pill-all {{ 'active' if not filters.library }}" href="#" data-val="">All libraries</a>
-    <a class="lib-filter-pill pill-lcpl {{ 'active' if filters.library == LCPL_LIBRARY_ID|string }}" href="#" data-val="{{ LCPL_LIBRARY_ID }}">🟢 Leon County (LCPL)</a>
-    <a class="lib-filter-pill pill-broward {{ 'active' if filters.library == BROWARD_LIBRARY_ID|string }}" href="#" data-val="{{ BROWARD_LIBRARY_ID }}">🟡 Broward County (BCL)</a>
+    <a class="lib-filter-pill pill-all {{ 'active' if not filters.library }}"
+       href="#" data-val="">All libraries</a>
+    <a class="lib-filter-pill pill-lcpl {{ 'active' if filters.library == LCPL_LIBRARY_ID|string }}"
+       href="#" data-val="{{ LCPL_LIBRARY_ID }}">🟢 Leon County (LCPL)</a>
+    <a class="lib-filter-pill pill-broward {{ 'active' if filters.library == BROWARD_LIBRARY_ID|string }}"
+       href="#" data-val="{{ BROWARD_LIBRARY_ID }}">🟡 Broward County (BCL)</a>
   </div>
 
   <!-- ── Active filter chips ──────────────────────────────────── -->
@@ -88,6 +84,7 @@
     {% if filters.type    %}<div class="fchip">type: {{ filters.type }}<button class="fchip-x" onclick="removeFilter('type')">✕</button></div>{% endif %}
     {% if filters.branch  %}<div class="fchip">branch: {{ filters.branch.split(' ')[0] }}<button class="fchip-x" onclick="removeFilter('branch')">✕</button></div>{% endif %}
     {% if filters.library %}
+    {# FIX: Compare against template variable, not hardcoded ID #}
     <div class="fchip {{ 'tl-avail' if filters.library == LCPL_LIBRARY_ID|string else 'tl-hold' }}">
       {{ 'LCPL' if filters.library == LCPL_LIBRARY_ID|string else 'Broward' }}
       <button class="fchip-x" onclick="removeFilter('library')">✕</button>
@@ -106,8 +103,11 @@
   {% if results %}
   <div class="results-grid" id="results-grid">
     {% for r in results %}
-    {% set lcpl_url    = "https://lcpl.ent.sirsi.net/client/en_US/lcpl/search/results?qu=&qu=TITLE%3D" ~ r.Title|urlencode ~ "+&qu=AUTHOR%3D" ~ (r.author or '')|urlencode ~ "+&te=ILS&h=1" %}
-    {% set broward_url = "https://broward.ent.sirsi.net/client/en_US/default/search/results?qu=&qu=TITLE%3D" ~ r.Title|urlencode ~ "+&qu=AUTHOR%3D" ~ (r.author or '')|urlencode ~ "+&qf=FORMAT%09Special+Format%09BOOK%09Books&h=1" %}
+    {# Build catalog search URLs using actual title/author — no hardcoded library IDs needed in URLs #}
+    {% set title_enc  = r.Title  | urlencode %}
+    {% set author_enc = (r.author or '') | urlencode %}
+    {% set lcpl_url    = "https://lcpl.ent.sirsi.net/client/en_US/lcpl/search/results?qu=&qu=TITLE%3D" ~ title_enc ~ "+&qu=AUTHOR%3D" ~ author_enc ~ "+&te=ILS&h=1" %}
+    {% set broward_url = "https://broward.ent.sirsi.net/client/en_US/default/search/results?qu=&qu=TITLE%3D" ~ title_enc ~ "+&qu=AUTHOR%3D" ~ author_enc ~ "+&qf=FORMAT%09Special+Format%09BOOK%09Books&h=1" %}
 
     <div class="manga-card"
          data-score="{{ r.Score or 0 }}"
@@ -160,7 +160,7 @@
           {% if r.hold_count  %}<span class="tl-chip tl-hold"><span class="tl-dot"></span>{{ r.hold_count }} on hold</span>{% endif %}
         </div>
 
-        <!-- Library tabs (only shown when >1 library) -->
+        <!-- Library tabs (only shown when >1 library present) -->
         {% if r.lib_list | length > 1 %}
         <div class="lib-tabs">
           {% for lib in r.lib_list %}
@@ -177,11 +177,10 @@
         <!-- Per-library panels -->
         {% for lib in r.lib_list %}
         {% set is_broward = lib.library_id == BROWARD_LIBRARY_ID %}
-        <div class="lib-panel {{ 'visible' if loop.first }}" id="lib-panel-{{ r.MangaID }}-{{ lib.library_id }}">
+        <div class="lib-panel {{ 'visible' if loop.first }}"
+             id="lib-panel-{{ r.MangaID }}-{{ lib.library_id }}">
 
           {% if lib.vol_list %}
-
-            {# ── Volume grid (same for LCPL and Broward) ── #}
             <div class="section-label" style="margin-top:.25rem">
               Volumes — {{ 'Broward County' if is_broward else 'Leon County' }}
             </div>
@@ -190,11 +189,11 @@
               {% for vol_entry in lib.vol_list %}
               <div class="vol-chip">
                 <div class="vol-chip-num">
-                  {% if vol_entry.vol == 0 %}Series{% else %}Vol. {{ vol_entry.vol }}{% endif %}
+                  {%- if vol_entry.vol == 0 %}Series{% else %}Vol. {{ vol_entry.vol }}{% endif %}
                 </div>
                 <div class="vol-chip-branches">
                   {% for b in vol_entry.branches %}
-                  {% set dot_cls = 'avail' if 'Available' in b.status else ('hold' if 'Hold' in b.status else 'out') %}
+                  {%- set dot_cls = 'avail' if 'Available' in b.status else ('hold' if 'Hold' in b.status else 'out') %}
                   <div class="vol-branch-row" title="{{ b.name }}: {{ b.status }}">
                     <span class="vol-branch-dot {{ dot_cls }}"></span>
                     <span class="vol-branch-name">{{ b.short }}</span>
@@ -205,7 +204,6 @@
               {% endfor %}
             </div>
 
-            {# ── Branch summary below the grid ── #}
             {% if lib.branch_list %}
             <div class="section-label" style="margin-top:.9rem">Branch summary</div>
             <div class="branch-avail-grid">
@@ -213,13 +211,12 @@
               <div class="branch-avail-row">
                 <span class="branch-avail-name" title="{{ b.name }}">{{ b.short }}</span>
                 <span class="branch-avail-status
-                  {% if 'Available' in b.status %} status-avail
-                  {% elif 'Hold'    in b.status %} status-hold
-                  {% else %}                        status-out
-                  {% endif %}">
-                  {% if 'Available' in b.status %}Available
-                  {% elif 'Hold'    in b.status %}On Hold
-                  {% else %}Checked Out{% endif %}
+                  {%- if 'Available' in b.status %} status-avail
+                  {%- elif 'Hold'    in b.status %} status-hold
+                  {%- else %}                        status-out{% endif %}">
+                  {%- if 'Available' in b.status %}Available
+                  {%- elif 'Hold'    in b.status %}On Hold
+                  {%- else %}Checked Out{% endif %}
                 </span>
               </div>
               {% endfor %}
@@ -238,7 +235,8 @@
         <!-- Action buttons -->
         <div style="display:flex;gap:8px;margin-top:1rem;align-items:center;flex-wrap:wrap">
           {% if r.has_lcpl %}
-          <a class="lib-link-btn" href="{{ lcpl_url }}" target="_blank" rel="noopener" onclick="event.stopPropagation()">↗ Leon County Library</a>
+          <a class="lib-link-btn" href="{{ lcpl_url }}" target="_blank" rel="noopener"
+             onclick="event.stopPropagation()">↗ Leon County Library</a>
           {% endif %}
           {% if r.has_broward %}
           <a class="lib-link-btn" href="{{ broward_url }}" target="_blank" rel="noopener"
@@ -247,7 +245,8 @@
           {% endif %}
           <a href="https://myanimelist.net/manga/{{ r.MangaID }}" target="_blank" rel="noopener"
              class="lib-link-btn" onclick="event.stopPropagation()">↗ MyAnimeList</a>
-          <button class="card-close-btn" onclick="event.stopPropagation();closeCard(this.closest('.manga-card'))">✕ Close</button>
+          <button class="card-close-btn"
+                  onclick="event.stopPropagation();closeCard(this.closest('.manga-card'))">✕ Close</button>
         </div>
       </div>
     </div>
@@ -277,6 +276,7 @@
 </div>
 
 <script>
+// ── Library filter pills ───────────────────────────────────────
 document.getElementById('lib-filter-row').addEventListener('click', e => {
   const pill = e.target.closest('.lib-filter-pill');
   if (!pill) return;
@@ -288,6 +288,7 @@ document.getElementById('lib-filter-row').addEventListener('click', e => {
   window.location.href = url.toString();
 });
 
+// ── Tab switching ──────────────────────────────────────────────
 function switchLibTab(btn, panelId) {
   const card = btn.closest('.manga-card');
   card.querySelectorAll('.lib-tab').forEach(t => t.className = t.className.replace(/\s*active-\S+/g, ''));
@@ -296,6 +297,7 @@ function switchLibTab(btn, panelId) {
   document.getElementById(panelId)?.classList.add('visible');
 }
 
+// ── Card expand/collapse ───────────────────────────────────────
 function toggleCard(card) {
   if (card.classList.contains('open')) { closeCard(card); return; }
   document.querySelectorAll('.manga-card.open').forEach(closeCard);
@@ -314,6 +316,7 @@ function closeCard(card) {
   expanded.style.display = 'none';
 }
 
+// ── Sort ───────────────────────────────────────────────────────
 let sortDir = {};
 function sortCards(key, btn) {
   document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
@@ -331,6 +334,7 @@ function sortCards(key, btn) {
   cards.forEach(c => grid.appendChild(c));
 }
 
+// ── Filter chip removal ────────────────────────────────────────
 function removeFilter(key) {
   const url = new URL(window.location.href);
   url.searchParams.delete(key);

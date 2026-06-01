@@ -340,5 +340,47 @@
     "status": "done",
     "message": "inserted 0 LCPL availability rows",
     "at": "2026-06-01T01:52:47.040654"
+  },
+  {
+    "job": "reset",
+    "status": "done",
+    "message": "✓ Schema recreated · ✓ manga.csv · ✓ libraries.csv · ✓ branches.csv",
+    "at": "2026-06-01T02:48:24.293465"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-01T02:48:46.598973"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 0 LCPL availability rows",
+    "at": "2026-06-01T02:50:02.900101"
+  },
+  {
+    "job": "reset",
+    "status": "done",
+    "message": "✓ Schema recreated · ✓ manga.csv · ✓ libraries.csv · ✓ branches.csv",
+    "at": "2026-06-01T02:57:21.521592"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 32 LCPL availability rows",
+    "at": "2026-06-01T02:57:37.306106"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 654 LCPL availability rows",
+    "at": "2026-06-01T03:02:06.911145"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-01T03:16:26.359964"
   }
 ]

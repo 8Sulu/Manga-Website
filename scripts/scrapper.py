@@ -190,6 +190,9 @@ def item_status(current_loc: str, due_date) -> str:
 
 def parse_title_info(data: dict, manga_id: int, availability_id: int) -> tuple:
     books = []
+    # FIX: BRANCH_MAPPING keys are short ILSWS libraryID codes (e.g. "NORTHEAST", "MAIN").
+    # The ILSWS API returns libraryID in the same short-code format.
+    # valid_branch_keys uses uppercase for case-insensitive matching.
     valid_branch_keys = {k.upper() for k in BRANCH_MAPPING}
 
     for title_entry in data.get("TitleInfo", []):
@@ -211,6 +214,8 @@ def parse_title_info(data: dict, manga_id: int, availability_id: int) -> tuple:
             books.append({
                 "manga_id":        manga_id,
                 "volume":          volume,
+                # FIX: store library_id (the short ILSWS code) as the branch key.
+                # write_to_db() will look this up in BRANCH_MAPPING to get the BranchID.
                 "branch_status":   [(library_id, final_status)],
                 "availability_id": availability_id,
             })
@@ -224,7 +229,7 @@ def scrape(start: int = 1, end: int = 1,
            indices: list[int] | None = None,
            debug: bool = False) -> list:
     debug_dir = DATA_DIR.parent / "debug" if debug else None
-    
+
     all_pairs = _load_title_author_map()
     pairs_to_scrape = []
 
@@ -293,9 +298,6 @@ def scrape(start: int = 1, end: int = 1,
     log.info(f"Scraping complete — {len(all_books)} volume entries")
     return all_books
 
-def _load_branch_id_map(cursor) -> dict:
-    cursor.execute("SELECT BranchID, BranchName FROM branch")
-    return {row[1].upper(): row[0] for row in cursor.fetchall()}
 
 def write_to_db(books: list) -> str:
     if not books:
@@ -306,14 +308,30 @@ def write_to_db(books: list) -> str:
     conn = mysql.connector.connect(**DB_CONFIG)
     cursor = conn.cursor()
 
-    # Get the exact LibraryID for Leon County
-    cursor.execute("SELECT LibraryID FROM library WHERE LibraryName LIKE '%Leon%' LIMIT 1")
-    lcpl_library_id = cursor.fetchone()[0]
+    # FIX: Use BRANCH_MAPPING directly to resolve short ILSWS codes → BranchIDs.
+    # The old approach re-queried the DB by uppercased full BranchName
+    # (e.g. "BRUCE J. HOST NORTHEAST BRANCH LIBRARY") and then tried to look up
+    # short codes like "NORTHEAST" in that map — always returning None, so
+    # inserted was always 0 and no branch_availability_status rows were ever written.
+    #
+    # BRANCH_MAPPING (from config/settings.py) already maps the exact short codes
+    # the ILSWS API returns as libraryID:
+    #   {"NORTHEAST": 1, "BLPERRY": 2, "EASTSIDE": 3, "FTBRADEN": 4,
+    #    "LAKEJAX": 5, "MAIN": 6, "WOODVILLE": 7}
+    branch_id_map = {k.upper(): v for k, v in BRANCH_MAPPING.items()}
 
-    manga_ids = list({b["manga_id"] for b in books})
+    # Resolve LCPL LibraryID to scope the delete correctly
+    cursor.execute("SELECT LibraryID FROM library WHERE LibraryName LIKE '%Leon%' LIMIT 1")
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        return "error: LCPL library not found in DB — run a DB reset first"
+    lcpl_library_id = row[0]
+
+    manga_ids    = list({b["manga_id"] for b in books})
     placeholders = ','.join(['%s'] * len(manga_ids))
-    
-    # Safe Deletion targeting the exact Library ID
+
+    # Delete existing LCPL availability rows for these titles before re-inserting
     cursor.execute(f"""
         DELETE bas FROM branch_availability_status bas
         JOIN availability a ON bas.AvailabilityID = a.AvailabilityID
@@ -321,34 +339,42 @@ def write_to_db(books: list) -> str:
         WHERE a.MangaID IN ({placeholders})
           AND b.LibraryID = %s
     """, (*manga_ids, lcpl_library_id))
-    
+
     cursor.execute(f"""
         DELETE a FROM availability a
         LEFT JOIN branch_availability_status bas ON a.AvailabilityID = bas.AvailabilityID
-        JOIN branch b ON bas.BranchID = b.BranchID  
         WHERE a.MangaID IN ({placeholders})
-          AND b.LibraryID = %s
           AND bas.AvailabilityID IS NULL
-    """, (*manga_ids, lcpl_library_id))
+    """, tuple(manga_ids))
 
-    branch_id_map = _load_branch_id_map(cursor)
-    inserted = 0
+    inserted  = 0
+    skipped   = 0
     for b in books:
-        cursor.execute("INSERT INTO availability (MangaID, Volume) VALUES (%s, %s)",
-                       (b["manga_id"], b["volume"]))
+        cursor.execute(
+            "INSERT INTO availability (MangaID, Volume) VALUES (%s, %s)",
+            (b["manga_id"], b["volume"]))
         avail_id = cursor.lastrowid
+
         for branch_key, status in b["branch_status"]:
             branch_id = branch_id_map.get(branch_key.upper())
             if branch_id:
                 cursor.execute(
-                    "INSERT INTO branch_availability_status (AvailabilityID, BranchID, Status) "
-                    "VALUES (%s, %s, %s)", (avail_id, branch_id, status))
+                    "INSERT INTO branch_availability_status "
+                    "(AvailabilityID, BranchID, Status) VALUES (%s, %s, %s)",
+                    (avail_id, branch_id, status))
                 inserted += 1
-                
+            else:
+                skipped += 1
+                log.warning(f"  Unknown branch key '{branch_key}' — not in BRANCH_MAPPING")
+
     conn.commit()
     cursor.close()
     conn.close()
-    return f"inserted {inserted} LCPL availability rows"
+
+    msg = f"inserted {inserted} LCPL availability rows"
+    if skipped:
+        msg += f" ({skipped} branch keys unrecognized — check BRANCH_MAPPING in settings.py)"
+    return msg
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 

@@ -125,6 +125,7 @@
       </div>
     </div>
 
+    {# FIX: Use template variables for library IDs instead of hardcoded values #}
     <form id="search-form" action="/search" method="get" style="width:100%;display:flex;flex-direction:column;align-items:center;gap:0">
       <div class="search-wrap">
         <div class="search-input-row">
@@ -169,9 +170,10 @@
           <a class="pill-btn pill-avail"      href="#" data-group="avail" data-val="available">🟢 Available now</a>
           <a class="pill-btn pill-out"        href="#" data-group="avail" data-val="out">🔴 Checked out</a>
           <span class="pill-divider">|</span>
-          <a class="pill-btn pill-all active" href="#" data-group="library" data-val="">Both libraries</a>
-          <a class="pill-btn pill-lcpl"       href="#" data-group="library" data-val="1">🟢 Leon County</a>
-          <a class="pill-btn pill-broward"    href="#" data-group="library" data-val="15">🟡 Broward</a>
+          {# FIX: data-val uses actual DB library IDs from the backend, not hardcoded integers #}
+          <a class="pill-btn pill-all active"  href="#" data-group="library" data-val="">Both libraries</a>
+          <a class="pill-btn pill-lcpl"         href="#" data-group="library" data-val="{{ LCPL_LIBRARY_ID }}">🟢 Leon County</a>
+          <a class="pill-btn pill-broward"      href="#" data-group="library" data-val="{{ BROWARD_LIBRARY_ID }}">🟡 Broward</a>
         </div>
       </div>
     </form>
