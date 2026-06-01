@@ -382,5 +382,17 @@
     "status": "done",
     "message": "[*] Done.",
     "at": "2026-06-01T03:16:26.359964"
+  },
+  {
+    "job": "reset",
+    "status": "done",
+    "message": "✓ Schema recreated · ✓ manga.csv · ✓ libraries.csv · ✓ branches.csv",
+    "at": "2026-06-01T20:55:29.332962+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-01T20:56:28.794654+00:00"
   }
 ]

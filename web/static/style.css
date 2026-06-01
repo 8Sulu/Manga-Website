@@ -346,3 +346,24 @@ p.empty  { font-family: var(--mono); font-size: .8rem; color: var(--text3); }
   .results-table th:nth-child(4), .results-table td:nth-child(4),
   .results-table th:nth-child(5), .results-table td:nth-child(5) { display: none; }
 }
+
+/* ── MAL status tri-state (appended to style.css) ────────────── */
+.manga-card.mal-hidden { display: none !important; }
+
+/* ── Vol chip as link ─────────────────────────────────────────── */
+a.vol-chip {
+  display: block; text-decoration: none; color: inherit;
+  transition: border-color .12s, background .12s;
+}
+a.vol-chip:hover {
+  border-color: var(--purple-brd);
+  background: var(--purple-bg);
+}
+a.vol-chip:hover .vol-chip-num { color: var(--purple); }
+
+/* ── vol1 pill ────────────────────────────────────────────────── */
+.pill-btn.pill-vol1.active {
+  background: var(--green-bg);
+  border-color: var(--green-brd);
+  color: var(--green);
+}

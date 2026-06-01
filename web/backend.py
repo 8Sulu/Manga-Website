@@ -428,8 +428,7 @@ def admin_login():
                 return redirect(request.args.get('next') or url_for('admin'))
             error = 'Invalid password'
 
-    return render_template('admin_login.html', error=error,
-                           csrf_token=_csrf_token())
+    return render_template('admin_login.html', error=error)
 
 @app.route('/admin/logout')
 def admin_logout():
@@ -457,8 +456,7 @@ def admin():
     """)
     return render_template('admin.html',
                            manga_per_library=manga_per_library,
-                           job_history=list(reversed(_read_job_history()))[:30],
-                           csrf_token=_csrf_token())
+                           job_history=list(reversed(_read_job_history()))[:30])
 
 def _handle_admin_post():
     # Validate CSRF for all POST actions
@@ -766,7 +764,7 @@ def api_mal_mangalist():
 
     for _ in range(max_pages):
         url = (f"https://api.myanimelist.net/v2/users/@me/mangalist"
-               f"?fields=list_status&limit={limit}&offset={offset}&sort=manga_id")
+               f"?fields=list_status&limit={limit}&offset={offset}")
         try:
             resp = req.get(url, headers={'Authorization': f'Bearer {access_token}'},
                            timeout=15)
@@ -984,7 +982,7 @@ def search():
             'has_lcpl':     td['has_lcpl'],
             'has_broward':  td['has_broward'],
             'lib_list':     lib_list,
-            'vol_count':    sum(len(linfo['volumes']) for linfo in td['lib_data'].values()),
+            'vol_count':    len({v for linfo in td['lib_data'].values() for v in linfo['volumes']}),
             'avail_count':  avail_count,
             'out_count':    out_count,
             'hold_count':   hold_count,
