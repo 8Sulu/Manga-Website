@@ -14,25 +14,31 @@
     .back-link:hover { color: var(--purple); }
     .sep { font-family: var(--mono); font-size: .6rem; color: var(--text3); opacity: .4; }
 
-    /* ── Volume grid (shared by LCPL + Broward) ─── */
+    /* ── Volume grid ────────────────────────────────────────── */
     .vol-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px,1fr)); gap: 5px; }
     .vol-chip {
       background: var(--bg4); border: 1px solid var(--border); border-radius: var(--r);
       padding: .35rem .55rem; font-family: var(--mono); font-size: .62rem;
+      transition: border-color .12s, background .12s;
     }
-    .vol-chip-num { color: var(--text3); margin-bottom: 3px; font-size: .58rem; }
+    /* Clickable volume chips */
+    a.vol-chip {
+      display: block; text-decoration: none; color: inherit; cursor: pointer;
+    }
+    a.vol-chip:hover {
+      border-color: var(--purple-brd); background: var(--purple-bg);
+    }
+    a.vol-chip:hover .vol-chip-num { color: var(--purple); }
+    .vol-chip-num { color: var(--text3); margin-bottom: 3px; font-size: .58rem; transition: color .12s; }
     .vol-chip-branches { display: flex; flex-direction: column; gap: 2px; }
     .vol-branch-row { display: flex; align-items: center; gap: 4px; }
-    .vol-branch-dot {
-      width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0;
-      background: var(--text3);
-    }
+    .vol-branch-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; background: var(--text3); }
     .vol-branch-dot.avail { background: var(--green); }
     .vol-branch-dot.hold  { background: var(--amber); }
     .vol-branch-dot.out   { background: var(--red); }
     .vol-branch-name { color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex:1; }
 
-    /* Branch flat list (compact summary at top of panel) */
+    /* Branch flat list */
     .branch-avail-grid { display: flex; flex-direction: column; gap: 4px; margin-bottom: .75rem; }
     .branch-avail-row { display: flex; align-items: center; gap: 8px; }
     .branch-avail-name {
@@ -44,6 +50,49 @@
     .status-avail { color: var(--green); }
     .status-hold  { color: var(--amber); }
     .status-out   { color: var(--red); }
+
+    /* ── MAL status filter ──────────────────────────────────── */
+    .mal-panel {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: var(--r-lg); padding: 1rem 1.25rem; margin-bottom: 1.25rem;
+    }
+    .mal-header { display: flex; align-items: center; gap: .75rem; margin-bottom: .85rem; flex-wrap: wrap; }
+    .mal-title  { font-family: var(--mono); font-size: .65rem; letter-spacing: .12em; text-transform: uppercase; color: var(--text2); }
+    .mal-status-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .mal-status-item {
+      display: flex; align-items: center; gap: 6px;
+      font-family: var(--mono); font-size: .68rem; color: var(--text2);
+      padding: 4px 10px; border-radius: 99px;
+      border: 1px solid var(--border2); background: var(--bg3); cursor: pointer;
+      user-select: none; transition: all .12s;
+    }
+    .mal-status-item:hover { border-color: var(--border3); }
+    /* tri-state: empty = neutral, include = green check, exclude = red x */
+    .mal-status-item[data-state="include"] {
+      background: var(--green-bg); border-color: var(--green-brd); color: var(--green);
+    }
+    .mal-status-item[data-state="exclude"] {
+      background: var(--red-bg); border-color: var(--red-brd); color: var(--red);
+    }
+    .mal-status-icon { font-size: .75rem; min-width: .85rem; text-align: center; }
+    .mal-loading { font-family: var(--mono); font-size: .68rem; color: var(--text3); }
+    .mal-error   { font-family: var(--mono); font-size: .68rem; color: var(--amber); }
+    .mal-load-btn {
+      font-family: var(--mono); font-size: .65rem; padding: 4px 12px;
+      background: var(--purple-bg); border: 1px solid var(--purple-brd);
+      color: var(--purple); border-radius: var(--r); cursor: pointer;
+    }
+    .mal-load-btn:hover { background: var(--purple); color: #fff; }
+
+    /* Cards hidden/dim by MAL filter */
+    .manga-card.mal-hidden { display: none !important; }
+    .manga-card.mal-dimmed { opacity: .35; filter: grayscale(.6); }
+
+    /* Vol link hint tooltip */
+    .vol-link-hint {
+      font-family: var(--mono); font-size: .58rem; color: var(--text3);
+      margin-top: .4rem; margin-bottom: .2rem; opacity: .7;
+    }
   </style>
 </head>
 <body>
@@ -55,9 +104,30 @@
     <span class="hero-eyebrow" style="margin:0">Search results</span>
   </header>
 
+  <!-- ── MAL status filter panel ──────────────────────────────── -->
+  <div class="mal-panel" id="mal-panel">
+    <div class="mal-header">
+      <span class="mal-title">Filter by MAL list</span>
+      <span class="mal-loading" id="mal-loading" style="display:none">Loading your list…</span>
+      <span class="mal-error"   id="mal-error"   style="display:none"></span>
+      <button class="mal-load-btn" id="mal-load-btn" onclick="loadMalList()">Load my MAL list</button>
+    </div>
+    <div class="mal-status-row" id="mal-status-row">
+      <!-- Rendered after MAL list loads; statuses are tri-state per category -->
+      <span style="font-family:var(--mono);font-size:.68rem;color:var(--text3)">
+        Click "Load my MAL list" to filter results by your reading status.
+      </span>
+    </div>
+    <div style="font-family:var(--mono);font-size:.62rem;color:var(--text3);margin-top:.6rem">
+      Click once to <span style="color:var(--green)">✓ include only</span>,
+      twice to <span style="color:var(--red)">✕ exclude</span>,
+      three times to reset.
+    </div>
+  </div>
+
   <!-- ── Results bar ───────────────────────────────────────────── -->
   <div class="results-bar">
-    <div class="results-count-big">{{ count }} title{{ 's' if count != 1 }}</div>
+    <div class="results-count-big" id="results-count">{{ count }} title{{ 's' if count != 1 }}</div>
     <div class="sort-btns">
       <button class="sort-btn active" onclick="sortCards('score',this)">Score</button>
       <button class="sort-btn" onclick="sortCards('title',this)">A–Z</button>
@@ -67,7 +137,6 @@
   </div>
 
   <!-- ── Library filter pills ──────────────────────────────────── -->
-  {# FIX: Use actual DB IDs from backend — never hardcode #}
   <div class="lib-filter-row" id="lib-filter-row">
     <a class="lib-filter-pill pill-all {{ 'active' if not filters.library }}"
        href="#" data-val="">All libraries</a>
@@ -84,7 +153,6 @@
     {% if filters.type    %}<div class="fchip">type: {{ filters.type }}<button class="fchip-x" onclick="removeFilter('type')">✕</button></div>{% endif %}
     {% if filters.branch  %}<div class="fchip">branch: {{ filters.branch.split(' ')[0] }}<button class="fchip-x" onclick="removeFilter('branch')">✕</button></div>{% endif %}
     {% if filters.library %}
-    {# FIX: Compare against template variable, not hardcoded ID #}
     <div class="fchip {{ 'tl-avail' if filters.library == LCPL_LIBRARY_ID|string else 'tl-hold' }}">
       {{ 'LCPL' if filters.library == LCPL_LIBRARY_ID|string else 'Broward' }}
       <button class="fchip-x" onclick="removeFilter('library')">✕</button>
@@ -96,6 +164,9 @@
       <button class="fchip-x" onclick="removeFilter('avail')">✕</button>
     </div>
     {% endif %}
+    {% if filters.no_vol1 == '1' %}
+    <div class="fchip tl-avail">Has vol. 1<button class="fchip-x" onclick="removeFilter('no_vol1')">✕</button></div>
+    {% endif %}
   </div>
   {% endif %}
 
@@ -103,17 +174,12 @@
   {% if results %}
   <div class="results-grid" id="results-grid">
     {% for r in results %}
-    {# Build catalog search URLs using actual title/author — no hardcoded library IDs needed in URLs #}
-    {% set title_enc  = r.Title  | urlencode %}
-    {% set author_enc = (r.author or '') | urlencode %}
-    {% set lcpl_url    = "https://lcpl.ent.sirsi.net/client/en_US/lcpl/search/results?qu=&qu=TITLE%3D" ~ title_enc ~ "+&qu=AUTHOR%3D" ~ author_enc ~ "+&te=ILS&h=1" %}
-    {% set broward_url = "https://broward.ent.sirsi.net/client/en_US/default/search/results?qu=&qu=TITLE%3D" ~ title_enc ~ "+&qu=AUTHOR%3D" ~ author_enc ~ "+&qf=FORMAT%09Special+Format%09BOOK%09Books&h=1" %}
-
     <div class="manga-card"
          data-score="{{ r.Score or 0 }}"
          data-title="{{ r.Title }}"
          data-avail="{{ r.avail_count }}"
          data-vols="{{ r.vol_count }}"
+         data-manga-id="{{ r.MangaID }}"
          onclick="toggleCard(this)">
 
       <!-- Cover -->
@@ -160,7 +226,7 @@
           {% if r.hold_count  %}<span class="tl-chip tl-hold"><span class="tl-dot"></span>{{ r.hold_count }} on hold</span>{% endif %}
         </div>
 
-        <!-- Library tabs (only shown when >1 library present) -->
+        <!-- Library tabs -->
         {% if r.lib_list | length > 1 %}
         <div class="lib-tabs">
           {% for lib in r.lib_list %}
@@ -177,19 +243,30 @@
         <!-- Per-library panels -->
         {% for lib in r.lib_list %}
         {% set is_broward = lib.library_id == BROWARD_LIBRARY_ID %}
+        {% set lib_label  = 'Broward County' if is_broward else 'Leon County' %}
         <div class="lib-panel {{ 'visible' if loop.first }}"
              id="lib-panel-{{ r.MangaID }}-{{ lib.library_id }}">
 
           {% if lib.vol_list %}
             <div class="section-label" style="margin-top:.25rem">
-              Volumes — {{ 'Broward County' if is_broward else 'Leon County' }}
+              Volumes — {{ lib_label }}
             </div>
+            <div class="vol-link-hint">↗ Click a volume to search the catalog for that volume</div>
 
             <div class="vol-grid">
               {% for vol_entry in lib.vol_list %}
-              <div class="vol-chip">
+              {# Build per-volume catalog URL #}
+              {% if is_broward %}
+                {% set vol_url = r.broward_url ~ ('&qu=' ~ vol_entry.vol if vol_entry.vol > 0 else '') %}
+              {% else %}
+                {% set vol_url = r.lcpl_url ~ ('&qu=' ~ vol_entry.vol if vol_entry.vol > 0 else '') %}
+              {% endif %}
+
+              <a class="vol-chip"
+                 href="{{ vol_url }}" target="_blank" rel="noopener"
+                 onclick="event.stopPropagation()">
                 <div class="vol-chip-num">
-                  {%- if vol_entry.vol == 0 %}Series{% else %}Vol. {{ vol_entry.vol }}{% endif %}
+                  {%- if vol_entry.vol == 0 %}Series{% else %}Vol. {{ vol_entry.vol }}{% endif -%}
                 </div>
                 <div class="vol-chip-branches">
                   {% for b in vol_entry.branches %}
@@ -200,7 +277,7 @@
                   </div>
                   {% endfor %}
                 </div>
-              </div>
+              </a>
               {% endfor %}
             </div>
 
@@ -235,11 +312,11 @@
         <!-- Action buttons -->
         <div style="display:flex;gap:8px;margin-top:1rem;align-items:center;flex-wrap:wrap">
           {% if r.has_lcpl %}
-          <a class="lib-link-btn" href="{{ lcpl_url }}" target="_blank" rel="noopener"
+          <a class="lib-link-btn" href="{{ r.lcpl_url }}" target="_blank" rel="noopener"
              onclick="event.stopPropagation()">↗ Leon County Library</a>
           {% endif %}
           {% if r.has_broward %}
-          <a class="lib-link-btn" href="{{ broward_url }}" target="_blank" rel="noopener"
+          <a class="lib-link-btn" href="{{ r.broward_url }}" target="_blank" rel="noopener"
              style="color:var(--amber);background:var(--amber-bg);border-color:var(--amber-brd)"
              onclick="event.stopPropagation()">↗ Broward County Library</a>
           {% endif %}
@@ -254,7 +331,7 @@
   </div>
 
   <div style="font-family:var(--mono);font-size:.63rem;color:var(--text3);margin-top:.75rem;text-align:center">
-    Click a card to expand · LCPL = Leon County · BCL = Broward County
+    Click a card to expand · Click a volume chip to search the catalog · LCPL = Leon County · BCL = Broward
   </div>
 
   {% else %}
@@ -339,6 +416,125 @@ function removeFilter(key) {
   const url = new URL(window.location.href);
   url.searchParams.delete(key);
   window.location.href = url.toString();
+}
+
+// ── MAL list integration ───────────────────────────────────────
+// malData: { manga_id (number): { status: string, ... } }
+let malData = null;
+// malFilters: { status_key: 'include' | 'exclude' | '' }
+let malFilters = {
+  reading: '', completed: '', on_hold: '', dropped: '', plan_to_read: ''
+};
+const MAL_STATUS_LABELS = {
+  reading:       'Reading',
+  completed:     'Completed',
+  on_hold:       'On Hold',
+  dropped:       'Dropped',
+  plan_to_read:  'Plan to Read',
+};
+
+async function loadMalList() {
+  const loadBtn  = document.getElementById('mal-load-btn');
+  const loading  = document.getElementById('mal-loading');
+  const errorEl  = document.getElementById('mal-error');
+  const statusRow = document.getElementById('mal-status-row');
+
+  loadBtn.style.display  = 'none';
+  loading.style.display  = 'inline';
+  errorEl.style.display  = 'none';
+
+  try {
+    const resp = await fetch('/api/mal/mangalist');
+    const json = await resp.json();
+    if (!json.ok) throw new Error(json.message || 'Failed to load MAL list');
+    malData = json.data;   // { "123": { status, score, num_volumes_read }, ... }
+
+    loading.style.display = 'none';
+
+    // Count per status
+    const counts = { reading: 0, completed: 0, on_hold: 0, dropped: 0, plan_to_read: 0 };
+    Object.values(malData).forEach(entry => {
+      if (counts.hasOwnProperty(entry.status)) counts[entry.status]++;
+    });
+
+    statusRow.innerHTML = Object.entries(MAL_STATUS_LABELS).map(([key, label]) => `
+      <div class="mal-status-item" data-status="${key}" data-state=""
+           onclick="toggleMalStatus('${key}',this)">
+        <span class="mal-status-icon" id="mal-icon-${key}">◦</span>
+        <span>${label}</span>
+        <span style="font-size:.6rem;opacity:.6">(${counts[key]})</span>
+      </div>
+    `).join('');
+
+  } catch(e) {
+    loading.style.display  = 'none';
+    errorEl.textContent    = '⚠ ' + e.message;
+    errorEl.style.display  = 'inline';
+    loadBtn.style.display  = 'inline';
+  }
+}
+
+function toggleMalStatus(status, el) {
+  const states = ['', 'include', 'exclude'];
+  const current = malFilters[status];
+  const next    = states[(states.indexOf(current) + 1) % 3];
+  malFilters[status] = next;
+  el.dataset.state   = next;
+
+  const icons = { '': '◦', 'include': '✓', 'exclude': '✕' };
+  document.getElementById('mal-icon-' + status).textContent = icons[next];
+  applyMalFilters();
+}
+
+function applyMalFilters() {
+  if (!malData) return;
+
+  const includeStatuses = Object.entries(malFilters)
+    .filter(([,v]) => v === 'include').map(([k]) => k);
+  const excludeStatuses = Object.entries(malFilters)
+    .filter(([,v]) => v === 'exclude').map(([k]) => k);
+
+  const allNeutral = includeStatuses.length === 0 && excludeStatuses.length === 0;
+
+  const grid    = document.getElementById('results-grid');
+  const cards   = grid ? [...grid.querySelectorAll('.manga-card')] : [];
+  let visCount  = 0;
+
+  cards.forEach(card => {
+    if (allNeutral) {
+      card.classList.remove('mal-hidden', 'mal-dimmed');
+      visCount++;
+      return;
+    }
+
+    const mangaId   = parseInt(card.dataset.mangaId, 10);
+    const listEntry = malData[mangaId];
+    const userStatus = listEntry ? listEntry.status : null;
+
+    let hidden = false;
+
+    // If there are any "include" filters, title must be in one of them
+    if (includeStatuses.length > 0) {
+      if (!userStatus || !includeStatuses.includes(userStatus)) hidden = true;
+    }
+    // If there are any "exclude" filters, title must NOT be in any of them
+    if (!hidden && excludeStatuses.includes(userStatus)) {
+      hidden = true;
+    }
+
+    card.classList.toggle('mal-hidden', hidden);
+    card.classList.remove('mal-dimmed');
+    if (!hidden) visCount++;
+  });
+
+  // Update count badge
+  const countEl = document.getElementById('results-count');
+  if (countEl) {
+    const total = cards.length;
+    countEl.textContent = allNeutral
+      ? `${total} title${total !== 1 ? 's' : ''}`
+      : `${visCount} of ${total} title${total !== 1 ? 's' : ''} shown`;
+  }
 }
 </script>
 </body>

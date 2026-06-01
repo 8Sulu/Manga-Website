@@ -77,14 +77,18 @@
   <div class="login-body">
     {% if error %}<div class="login-error">{{ error }}</div>{% endif %}
 
-    <form method="POST" action="{{ url_for('admin_login') }}{% if request.args.get('next') %}?next={{ request.args.get('next')|urlencode }}{% endif %}">
+    <form method="POST"
+          action="{{ url_for('admin_login') }}{% if request.args.get('next') %}?next={{ request.args.get('next')|urlencode }}{% endif %}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
       <div class="login-field" style="margin-bottom:1rem">
         <label class="login-label" for="password">Password</label>
         <div class="pw-wrap">
           <input type="password" name="password" id="password"
                  placeholder="Enter admin password"
                  autocomplete="current-password" autofocus required>
-          <button type="button" class="pw-toggle" id="pw-toggle" onclick="togglePw()" title="Show/hide">👁</button>
+          <button type="button" class="pw-toggle" id="pw-toggle"
+                  onclick="togglePw()" title="Show/hide">👁</button>
         </div>
       </div>
       <button type="submit" class="btn login-btn">Sign in →</button>

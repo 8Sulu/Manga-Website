@@ -90,11 +90,12 @@
       cursor: pointer; transition: all .15s; text-decoration: none;
     }
     .pill-btn:hover { border-color: var(--border3); color: var(--text); }
-    .pill-btn.pill-avail.active   { background: var(--green-bg);  border-color: var(--green-brd);  color: var(--green); }
-    .pill-btn.pill-out.active     { background: var(--red-bg);    border-color: var(--red-brd);    color: var(--red); }
-    .pill-btn.pill-all.active     { background: var(--purple-bg); border-color: var(--purple-brd); color: var(--purple); }
-    .pill-btn.pill-lcpl.active    { background: var(--green-bg);  border-color: var(--green-brd);  color: var(--green); }
-    .pill-btn.pill-broward.active { background: var(--amber-bg);  border-color: var(--amber-brd);  color: var(--amber); }
+    .pill-btn.pill-avail.active    { background: var(--green-bg);  border-color: var(--green-brd);  color: var(--green); }
+    .pill-btn.pill-out.active      { background: var(--red-bg);    border-color: var(--red-brd);    color: var(--red); }
+    .pill-btn.pill-all.active      { background: var(--purple-bg); border-color: var(--purple-brd); color: var(--purple); }
+    .pill-btn.pill-lcpl.active     { background: var(--green-bg);  border-color: var(--green-brd);  color: var(--green); }
+    .pill-btn.pill-broward.active  { background: var(--amber-bg);  border-color: var(--amber-brd);  color: var(--amber); }
+    .pill-btn.pill-vol1.active     { background: var(--green-bg);  border-color: var(--green-brd);  color: var(--green); }
     .pill-divider { font-family: var(--mono); font-size: .6rem; color: var(--text3); display: flex; align-items: center; padding: 0 2px; opacity: .4; }
 
     /* ── About card ──────────────────────────────────────── */
@@ -125,8 +126,8 @@
       </div>
     </div>
 
-    {# FIX: Use template variables for library IDs instead of hardcoded values #}
-    <form id="search-form" action="/search" method="get" style="width:100%;display:flex;flex-direction:column;align-items:center;gap:0">
+    <form id="search-form" action="/search" method="get"
+          style="width:100%;display:flex;flex-direction:column;align-items:center;gap:0">
       <div class="search-wrap">
         <div class="search-input-row">
           <input type="text" name="title" id="search-input"
@@ -135,23 +136,28 @@
           <button type="submit" class="search-go-btn">Search</button>
         </div>
         <div class="typeahead-dropdown" id="typeahead"></div>
+
+        <!-- Hidden fields populated by pill/select state -->
         <input type="hidden" name="type"    id="f-type">
         <input type="hidden" name="branch"  id="f-branch">
         <input type="hidden" name="avail"   id="f-avail">
         <input type="hidden" name="library" id="f-library">
+        <input type="hidden" name="no_vol1" id="f-no-vol1">
       </div>
 
       <div class="filter-strip">
         <div class="filter-selects">
-          <select class="filter-select" id="sel-type" onchange="document.getElementById('f-type').value=this.value">
+          <select class="filter-select" id="sel-type"
+                  onchange="document.getElementById('f-type').value=this.value">
             <option value="">All types</option>
             <option>Manga</option>
-            <option value="Light-Novel">Light Novel</option>
+            <option value="Light Novel">Light Novel</option>
             <option>Novel</option>
             <option>Manhwa</option>
             <option>Manhua</option>
           </select>
-          <select class="filter-select" id="sel-branch" onchange="document.getElementById('f-branch').value=this.value">
+          <select class="filter-select" id="sel-branch"
+                  onchange="document.getElementById('f-branch').value=this.value">
             <option value="">All branches</option>
             <optgroup label="Leon County (LCPL)">
               <option value="Leroy Collins Leon County Main Public Library">Main — Leroy Collins</option>
@@ -165,15 +171,24 @@
           </select>
         </div>
 
-        <div class="pill-row" id="avail-pills">
+        <div class="pill-row" id="filter-pills">
+          <!-- Availability -->
           <a class="pill-btn pill-all active" href="#" data-group="avail" data-val="">Any status</a>
           <a class="pill-btn pill-avail"      href="#" data-group="avail" data-val="available">🟢 Available now</a>
           <a class="pill-btn pill-out"        href="#" data-group="avail" data-val="out">🔴 Checked out</a>
+
           <span class="pill-divider">|</span>
-          {# FIX: data-val uses actual DB library IDs from the backend, not hardcoded integers #}
+
+          <!-- Library -->
           <a class="pill-btn pill-all active"  href="#" data-group="library" data-val="">Both libraries</a>
           <a class="pill-btn pill-lcpl"         href="#" data-group="library" data-val="{{ LCPL_LIBRARY_ID }}">🟢 Leon County</a>
           <a class="pill-btn pill-broward"      href="#" data-group="library" data-val="{{ BROWARD_LIBRARY_ID }}">🟡 Broward</a>
+
+          <span class="pill-divider">|</span>
+
+          <!-- Has vol. 1 toggle -->
+          <a class="pill-btn pill-vol1" href="#" data-group="no_vol1" data-val="1"
+             title="Only show titles where volume 1 is in the library">📚 Has vol. 1</a>
         </div>
       </div>
     </form>
@@ -202,6 +217,7 @@
 </div>
 
 <script>
+// ── Stats ──────────────────────────────────────────────────────
 async function loadStats() {
   try {
     const d = await fetch('/api/stats').then(r => r.json());
@@ -212,13 +228,16 @@ async function loadStats() {
 loadStats();
 
 // ── Typeahead ──────────────────────────────────────────────────
-const input = document.getElementById('search-input');
+const input    = document.getElementById('search-input');
 const dropdown = document.getElementById('typeahead');
 let debounce, activeIdx = -1, lastQuery = '';
 
 function highlight(text, query) {
   if (!query) return text;
-  return text.replace(new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'), '<em>$1</em>');
+  return text.replace(
+    new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'),
+    '<em>$1</em>',
+  );
 }
 
 async function fetchSuggestions(q) {
@@ -253,14 +272,14 @@ function closeDropdown() { dropdown.classList.remove('open'); activeIdx = -1; }
 
 function navigateTo(title) {
   const p = new URLSearchParams({ title });
-  const typeVal    = document.getElementById('sel-type').value;
-  const branchVal  = document.getElementById('sel-branch').value;
-  const availVal   = document.getElementById('f-avail').value;
-  const libraryVal = document.getElementById('f-library').value;
-  if (typeVal)    p.set('type',    typeVal);
-  if (branchVal)  p.set('branch',  branchVal);
-  if (availVal)   p.set('avail',   availVal);
-  if (libraryVal) p.set('library', libraryVal);
+  const vals = {
+    type:    document.getElementById('f-type').value,
+    branch:  document.getElementById('f-branch').value,
+    avail:   document.getElementById('f-avail').value,
+    library: document.getElementById('f-library').value,
+    no_vol1: document.getElementById('f-no-vol1').value,
+  };
+  Object.entries(vals).forEach(([k, v]) => { if (v) p.set(k, v); });
   window.location.href = '/search?' + p.toString();
 }
 
@@ -271,22 +290,47 @@ input.addEventListener('input', () => {
 input.addEventListener('keydown', e => {
   const items = dropdown.querySelectorAll('.ta-item');
   if (!dropdown.classList.contains('open')) return;
-  if (e.key === 'ArrowDown')  { e.preventDefault(); activeIdx = Math.min(activeIdx + 1, items.length - 1); items.forEach((el, i) => el.classList.toggle('active', i === activeIdx)); }
-  else if (e.key === 'ArrowUp') { e.preventDefault(); activeIdx = Math.max(activeIdx - 1, -1); items.forEach((el, i) => el.classList.toggle('active', i === activeIdx)); }
-  else if (e.key === 'Enter' && activeIdx >= 0) { e.preventDefault(); navigateTo(items[activeIdx].dataset.title); }
-  else if (e.key === 'Escape') closeDropdown();
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    activeIdx = Math.min(activeIdx + 1, items.length - 1);
+    items.forEach((el, i) => el.classList.toggle('active', i === activeIdx));
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    activeIdx = Math.max(activeIdx - 1, -1);
+    items.forEach((el, i) => el.classList.toggle('active', i === activeIdx));
+  } else if (e.key === 'Enter' && activeIdx >= 0) {
+    e.preventDefault();
+    navigateTo(items[activeIdx].dataset.title);
+  } else if (e.key === 'Escape') {
+    closeDropdown();
+  }
 });
-document.addEventListener('click', e => { if (!e.target.closest('.search-wrap')) closeDropdown(); });
+document.addEventListener('click', e => {
+  if (!e.target.closest('.search-wrap')) closeDropdown();
+});
 
 // ── Pill toggles ───────────────────────────────────────────────
-document.getElementById('avail-pills').addEventListener('click', e => {
+// Groups: avail (single-select), library (single-select), no_vol1 (toggle)
+document.getElementById('filter-pills').addEventListener('click', e => {
   const pill = e.target.closest('.pill-btn');
   if (!pill || !pill.dataset.group) return;
   e.preventDefault();
-  const group = pill.dataset.group;
+
+  const group  = pill.dataset.group;
+  const val    = pill.dataset.val;
+
+  if (group === 'no_vol1') {
+    // Toggle: active → set value 1, inactive → clear
+    const isActive = pill.classList.contains('active');
+    pill.classList.toggle('active', !isActive);
+    document.getElementById('f-no-vol1').value = isActive ? '' : '1';
+    return;
+  }
+
+  // Single-select groups
   document.querySelectorAll(`.pill-btn[data-group="${group}"]`).forEach(p => p.classList.remove('active'));
   pill.classList.add('active');
-  document.getElementById(group === 'avail' ? 'f-avail' : 'f-library').value = pill.dataset.val;
+  document.getElementById(group === 'avail' ? 'f-avail' : 'f-library').value = val;
 });
 </script>
 </body>
