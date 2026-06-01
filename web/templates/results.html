@@ -13,6 +13,45 @@
     .back-link { font-family: var(--mono); font-size: .7rem; color: var(--text3); display: flex; align-items: center; gap: 5px; }
     .back-link:hover { color: var(--purple); }
     .sep { font-family: var(--mono); font-size: .6rem; color: var(--text3); opacity: .4; }
+
+    /* ── Volume grid (shared by LCPL + Broward) ─── */
+    .vol-section { margin-bottom: .5rem; }
+    .vol-section-label {
+      font-family: var(--mono); font-size: .58rem; letter-spacing: .12em;
+      text-transform: uppercase; color: var(--text3); margin-bottom: .4rem;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .vol-section-label::after { content:''; flex:1; height:1px; background:var(--border); }
+
+    .vol-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px,1fr)); gap: 5px; }
+    .vol-chip {
+      background: var(--bg4); border: 1px solid var(--border); border-radius: var(--r);
+      padding: .35rem .55rem; font-family: var(--mono); font-size: .62rem;
+    }
+    .vol-chip-num { color: var(--text3); margin-bottom: 3px; font-size: .58rem; }
+    .vol-chip-branches { display: flex; flex-direction: column; gap: 2px; }
+    .vol-branch-row { display: flex; align-items: center; gap: 4px; }
+    .vol-branch-dot {
+      width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0;
+      background: var(--text3);
+    }
+    .vol-branch-dot.avail { background: var(--green); }
+    .vol-branch-dot.hold  { background: var(--amber); }
+    .vol-branch-dot.out   { background: var(--red); }
+    .vol-branch-name { color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex:1; }
+
+    /* Branch flat list (compact summary at top of panel) */
+    .branch-avail-grid { display: flex; flex-direction: column; gap: 4px; margin-bottom: .75rem; }
+    .branch-avail-row { display: flex; align-items: center; gap: 8px; }
+    .branch-avail-name {
+      font-family: var(--mono); font-size: .68rem; color: var(--text2);
+      min-width: 90px; flex-shrink: 0;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .branch-avail-status { font-family: var(--mono); font-size: .68rem; }
+    .status-avail { color: var(--green); }
+    .status-hold  { color: var(--amber); }
+    .status-out   { color: var(--red); }
   </style>
 </head>
 <body>
@@ -121,6 +160,7 @@
           {% if r.hold_count  %}<span class="tl-chip tl-hold"><span class="tl-dot"></span>{{ r.hold_count }} on hold</span>{% endif %}
         </div>
 
+        <!-- Library tabs (only shown when >1 library) -->
         {% if r.lib_list | length > 1 %}
         <div class="lib-tabs">
           {% for lib in r.lib_list %}
@@ -134,32 +174,58 @@
         </div>
         {% endif %}
 
+        <!-- Per-library panels -->
         {% for lib in r.lib_list %}
         {% set is_broward = lib.library_id == BROWARD_LIBRARY_ID %}
         <div class="lib-panel {{ 'visible' if loop.first }}" id="lib-panel-{{ r.MangaID }}-{{ lib.library_id }}">
 
-          {% if lib.branch_list %}
+          {% if lib.vol_list %}
+
+            {# ── Volume grid (same for LCPL and Broward) ── #}
             <div class="section-label" style="margin-top:.25rem">
-              Branches — {{ 'Broward County' if is_broward else 'Leon County' }}
+              Volumes — {{ 'Broward County' if is_broward else 'Leon County' }}
             </div>
+
+            <div class="vol-grid">
+              {% for vol_entry in lib.vol_list %}
+              <div class="vol-chip">
+                <div class="vol-chip-num">
+                  {% if vol_entry.vol == 0 %}Series{% else %}Vol. {{ vol_entry.vol }}{% endif %}
+                </div>
+                <div class="vol-chip-branches">
+                  {% for b in vol_entry.branches %}
+                  {% set dot_cls = 'avail' if 'Available' in b.status else ('hold' if 'Hold' in b.status else 'out') %}
+                  <div class="vol-branch-row" title="{{ b.name }}: {{ b.status }}">
+                    <span class="vol-branch-dot {{ dot_cls }}"></span>
+                    <span class="vol-branch-name">{{ b.short }}</span>
+                  </div>
+                  {% endfor %}
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+
+            {# ── Branch summary below the grid ── #}
+            {% if lib.branch_list %}
+            <div class="section-label" style="margin-top:.9rem">Branch summary</div>
             <div class="branch-avail-grid">
               {% for b in lib.branch_list %}
-              {% set s = b.status %}
               <div class="branch-avail-row">
-                <span class="branch-avail-name"
-                      title="{{ b.name }}">{{ b.short }}</span>
+                <span class="branch-avail-name" title="{{ b.name }}">{{ b.short }}</span>
                 <span class="branch-avail-status
-                  {% if 'Available' in s %} status-avail
-                  {% elif 'Hold' in s %}    status-hold
-                  {% else %}               status-out
+                  {% if 'Available' in b.status %} status-avail
+                  {% elif 'Hold'    in b.status %} status-hold
+                  {% else %}                        status-out
                   {% endif %}">
-                  {% if 'Available' in s %}Available
-                  {% elif 'Hold' in s %}On Hold
+                  {% if 'Available' in b.status %}Available
+                  {% elif 'Hold'    in b.status %}On Hold
                   {% else %}Checked Out{% endif %}
                 </span>
               </div>
               {% endfor %}
             </div>
+            {% endif %}
+
           {% else %}
             <div style="font-family:var(--mono);font-size:.75rem;color:var(--text3);padding:.4rem 0">
               No availability data scraped yet.

@@ -1,11 +1,12 @@
 """
-Broward County Library manga scraper — per-branch edition.
+Broward County Library manga scraper — volume-aware, per-branch edition.
 
-Uses the SirsiDynix `lookuptitleinfo` endpoint which returns per-copy,
-per-branch JSON:
-  {"childRecords": [{"LIBRARY": "Main Library", "SD_ITEM_STATUS": "General Collection"}, ...]}
+Mirrors the LCPL data model exactly:
+  - One availability row per (MangaID, Volume)
+  - One branch_availability_status row per (availability, branch)
 
-Each branch gets its own branch_availability_status row (same as LCPL).
+Volume numbers are extracted from the detail-panel title (e.g. "Vol. 22").
+Items whose title contains no volume pattern are stored as Volume=0 (series-level).
 
 Usage:
     python broward_scrapper.py                     scrape all titles
@@ -28,6 +29,7 @@ from collections import defaultdict
 from pathlib import Path
 
 import requests
+from bs4 import BeautifulSoup
 
 sys.path.append(str(Path(__file__).parent.parent))
 from config.settings import DATA_DIR, DB_CONFIG
@@ -57,6 +59,26 @@ ON_SHELF_STATUSES = {
     "young adult",
     "children",
 }
+
+# Patterns to extract a volume number from a title string
+# Matches: "Vol. 22", "Volume 22", "v.22", "v22", "#22", "No. 22", "Part 22"
+_VOL_PATTERNS = [
+    re.compile(r'\bvol(?:ume)?\.?\s*(\d+)', re.I),
+    re.compile(r'\bv\.?\s*(\d+)\b', re.I),
+    re.compile(r'#\s*(\d+)\b'),
+    re.compile(r'\bno\.?\s*(\d+)\b', re.I),
+    re.compile(r'\bpart\s*(\d+)\b', re.I),
+    re.compile(r'\bbook\s*(\d+)\b', re.I),
+]
+
+
+def extract_volume(title: str) -> int:
+    """Return volume number from a title string, or 0 if none found."""
+    for pat in _VOL_PATTERNS:
+        m = pat.search(title)
+        if m:
+            return int(m.group(1))
+    return 0
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
@@ -98,16 +120,18 @@ def _load_broward_branch_map() -> dict[str, int]:
 
 
 def _upsert_broward_results(cursor, manga_id: int, broward_library_id: int,
-                             branch_statuses: list[dict]) -> str:
+                             volume_branch_map: dict[int, dict[str, str]]) -> str:
     """
-    branch_statuses: [{"branch_id": int, "status": str}, ...]
+    volume_branch_map: {volume_num: {branch_name: status}}
 
-    Deletes all existing Broward availability rows for this manga_id,
-    then inserts one availability row + one branch_availability_status row
-    per branch that has at least one copy.
+    Deletes all existing Broward availability rows for this manga_id, then inserts:
+      - One availability row per volume
+      - One branch_availability_status row per branch for that volume
+
+    This mirrors the LCPL structure exactly.
     """
-    if not branch_statuses:
-        return "no branch data to store"
+    if not volume_branch_map:
+        return "no volume data to store"
 
     # Delete old Broward rows for this title
     cursor.execute(
@@ -128,21 +152,26 @@ def _upsert_broward_results(cursor, manga_id: int, broward_library_id: int,
         (manga_id,),
     )
 
-    inserted = 0
-    # One availability row per branch (volume=0 for Broward, no volume breakdown)
-    for bs in branch_statuses:
+    avail_inserted = branch_inserted = 0
+    for volume_num in sorted(volume_branch_map.keys()):
+        branch_statuses = volume_branch_map[volume_num]
+        if not branch_statuses:
+            continue
         cursor.execute(
             "INSERT INTO availability (MangaID, Volume) VALUES (%s, %s)",
-            (manga_id, 0),
+            (manga_id, volume_num),
         )
-        cursor.execute(
-            "INSERT INTO branch_availability_status "
-            "(AvailabilityID, BranchID, `Status`) VALUES (%s, %s, %s)",
-            (cursor.lastrowid, bs["branch_id"], bs["status"]),
-        )
-        inserted += 1
+        avail_id = cursor.lastrowid
+        avail_inserted += 1
+        for branch_id, status in branch_statuses.items():
+            cursor.execute(
+                "INSERT INTO branch_availability_status "
+                "(AvailabilityID, BranchID, `Status`) VALUES (%s, %s, %s)",
+                (avail_id, branch_id, status),
+            )
+            branch_inserted += 1
 
-    return f"inserted {inserted} branch row(s)"
+    return f"inserted {avail_inserted} avail + {branch_inserted} branch rows"
 
 
 # ── Scraping logic ────────────────────────────────────────────────────────────
@@ -178,14 +207,14 @@ def get_search_results(session: requests.Session, title: str, author: str,
     return all_ids
 
 
-def fetch_item_copies(session: requests.Session, item_id: str,
-                      title: str, author: str, debug: bool) -> list[dict]:
+def fetch_item_detail(session: requests.Session, item_id: str,
+                      title: str, author: str, debug: bool) -> tuple[int, list[dict]]:
     """
     Two-step fetch:
-      1. POST detailclick      → primes session, extracts sdcsrf token
-      2. POST lookuptitleinfo  → {"childRecords": [{"LIBRARY":…, "SD_ITEM_STATUS":…}]}
+      1. POST detailclick  → HTML panel; extract volume number from title
+      2. POST lookuptitleinfo → {"childRecords": [...]} with per-copy branch/status
 
-    Returns [{"library": str, "status": str, "on_shelf": bool}, ...]
+    Returns (volume_number, [{"library": str, "status": str, "on_shelf": bool}])
     """
     et = urllib.parse.quote_plus(title)
     ea = urllib.parse.quote_plus(author)
@@ -203,7 +232,7 @@ def fetch_item_copies(session: requests.Session, item_id: str,
         "Referer": f"{BASE_URL}{CLIENT}/search/results?qu=TITLE%3D{et}"
     })
 
-    # Step 1 — detailclick
+    # ── Step 1: detailclick — get panel HTML to extract volume ────────────────
     detail_url = (
         f"{BASE_URL}{CLIENT}/search/results"
         f".displaypanel.displaycell_0:detailclick"
@@ -211,20 +240,32 @@ def fetch_item_copies(session: requests.Session, item_id: str,
         f"/tabDISCOVERY_ALLlistItem?{qs}"
     )
     if debug: print(f"[DEBUG] detailclick: {detail_url}")
+
+    volume = 0
+    sdcsrf = None
     try:
         r1 = session.post(detail_url, data=payload, timeout=15)
         if r1.status_code != 200:
-            log.warning(f"  detailclick {item_id} → {r1.status_code}"); return []
+            log.warning(f"  detailclick {item_id} → {r1.status_code}")
+            return 0, []
+
+        # Extract sdcsrf token
         sdcsrf = session.cookies.get("sdcsrf")
         m = re.search(r"sdcsrf=([a-f0-9\-]+)", r1.text)
         if m: sdcsrf = m.group(1)
         if not sdcsrf:
-            log.warning(f"  No sdcsrf for {item_id}"); return []
+            log.warning(f"  No sdcsrf for {item_id}")
+            return 0, []
         session.headers.update({"sdcsrf": sdcsrf})
-    except Exception as e:
-        log.warning(f"  detailclick error {item_id}: {e}"); return []
 
-    # Step 2 — lookuptitleinfo
+        # Extract volume from detail panel title
+        volume = _extract_volume_from_panel(r1.text, item_id, debug)
+
+    except Exception as e:
+        log.warning(f"  detailclick error {item_id}: {e}")
+        return 0, []
+
+    # ── Step 2: lookuptitleinfo — get per-copy branch/status ─────────────────
     info_url = (
         f"{BASE_URL}{CLIENT}/search/results"
         f".displaypanel.displaycell_0.detail.detailavailabilityaccordions"
@@ -235,7 +276,8 @@ def fetch_item_copies(session: requests.Session, item_id: str,
     try:
         r2 = session.post(info_url, data={**payload, "sdcsrf": sdcsrf}, timeout=15)
         if r2.status_code != 200:
-            log.warning(f"  lookuptitleinfo {item_id} → {r2.status_code}"); return []
+            log.warning(f"  lookuptitleinfo {item_id} → {r2.status_code}")
+            return volume, []
 
         records = r2.json().get("childRecords", [])
         copies = []
@@ -246,54 +288,95 @@ def fetch_item_copies(session: requests.Session, item_id: str,
             copies.append({"library": library, "status": raw_status, "on_shelf": on_shelf})
 
         if debug:
-            print(f"[DEBUG] item {item_id}: {len(copies)} copies")
+            print(f"[DEBUG] item {item_id} vol={volume}: {len(copies)} copies")
             for c in copies:
                 print(f"  [{'✓' if c['on_shelf'] else '✗'}] {c['library']} — {c['status']}")
-        return copies
+        return volume, copies
+
     except Exception as e:
-        log.warning(f"  lookuptitleinfo error {item_id}: {e}"); return []
+        log.warning(f"  lookuptitleinfo error {item_id}: {e}")
+        return volume, []
 
 
-def copies_to_branch_statuses(all_copies: list[dict],
-                               branch_map: dict[str, int],
-                               debug: bool) -> list[dict]:
+def _extract_volume_from_panel(html: str, item_id: str, debug: bool) -> int:
     """
-    Aggregate all per-copy records across all items for a title.
-    For each branch that has at least one copy, emit one status:
-      - "Available"   if any copy is on-shelf
-      - "On Hold"     if no copy on-shelf but at least one hold (status contains "hold")
-      - "Checked Out" otherwise
+    Parse the detail panel HTML to find the volume number.
 
-    Returns [{"branch_id": int, "branch_name": str, "status": str}, ...]
+    Tries multiple strategies in order:
+      1. detailValue / bibliographic title field
+      2. Any visible title text in the panel
+      3. Call number (e.g. "YA 741.5952 OD v.22")
     """
-    # Group copies by branch name
-    by_branch: dict[str, list[dict]] = defaultdict(list)
-    for c in all_copies:
-        by_branch[c["library"]].append(c)
+    soup = BeautifulSoup(html, "html.parser")
 
-    result = []
-    unmatched = []
-    for branch_name, copies in by_branch.items():
-        branch_id = branch_map.get(branch_name)
-        if branch_id is None:
-            unmatched.append(branch_name)
-            continue
+    # Strategy 1: look for the bibliographic title field
+    for selector in (
+        "[id*='detailValue'][id*='TITLE']",
+        ".detailValue",
+        ".displayDetailTitle",
+        "td.detailValue",
+        "span.displayDetailValue",
+    ):
+        for el in soup.select(selector):
+            text = el.get_text(" ", strip=True)
+            vol = extract_volume(text)
+            if vol:
+                if debug: print(f"[DEBUG]   vol {vol} from selector '{selector}': {text[:80]}")
+                return vol
 
-        if any(c["on_shelf"] for c in copies):
-            status = "Available"
-        elif any("hold" in c["status"].lower() for c in copies):
-            status = "On Hold"
-        else:
-            status = "Checked Out"
+    # Strategy 2: scan all text in the panel for volume patterns
+    full_text = soup.get_text(" ")
+    vol = extract_volume(full_text)
+    if vol:
+        if debug: print(f"[DEBUG]   vol {vol} from full panel text")
+        return vol
 
-        result.append({"branch_id": branch_id, "branch_name": branch_name, "status": status})
+    if debug: print(f"[DEBUG]   no volume found in panel for item {item_id}")
+    return 0
+
+
+def build_volume_branch_map(
+    item_copies: list[tuple[int, list[dict]]],
+    branch_map: dict[str, int],
+    debug: bool,
+) -> dict[int, dict[int, str]]:
+    """
+    Aggregate per-item copy data into:
+      {volume_num: {branch_id: best_status}}
+
+    For each (volume, branch) pair, prefer "Available" > "On Hold" > "Checked Out".
+    """
+    STATUS_PRIORITY = {"Available": 2, "On Hold": 1, "Checked Out": 0}
+
+    # {volume -> {branch_id -> best_status}}
+    result: dict[int, dict[int, str]] = defaultdict(dict)
+    unmatched: set[str] = set()
+
+    for volume, copies in item_copies:
+        for copy in copies:
+            branch_name = copy["library"]
+            branch_id   = branch_map.get(branch_name)
+            if branch_id is None:
+                unmatched.add(branch_name)
+                continue
+
+            if copy["on_shelf"]:
+                status = "Available"
+            elif "hold" in copy["status"].lower():
+                status = "On Hold"
+            else:
+                status = "Checked Out"
+
+            current = result[volume].get(branch_id)
+            if current is None or STATUS_PRIORITY[status] > STATUS_PRIORITY[current]:
+                result[volume][branch_id] = status
 
     if unmatched:
-        log.warning(f"  Unmatched branch names (not in DB): {unmatched}")
+        log.warning(f"  Unmatched branch names (not in DB): {sorted(unmatched)}")
         if debug:
-            print(f"[DEBUG] unmatched branches: {unmatched}")
+            print(f"[DEBUG] unmatched branches: {sorted(unmatched)}")
 
-    return result
+    return dict(result)
 
 
 # ── Main processing ───────────────────────────────────────────────────────────
@@ -312,7 +395,7 @@ def process_batch(args: argparse.Namespace) -> None:
     except RuntimeError as e:
         print(f"[-] {e}"); return
 
-    # Resolve which LibraryID is Broward (needed for safe delete)
+    # Resolve LibraryID for Broward
     conn = _get_db()
     cur  = conn.cursor(dictionary=True)
     cur.execute("SELECT LibraryID FROM library WHERE LibraryName LIKE %s LIMIT 1", ("%Broward%",))
@@ -337,7 +420,7 @@ def process_batch(args: argparse.Namespace) -> None:
     pairs = [all_pairs[i - 1] for i in indices if 1 <= i <= len(all_pairs)]
     if not pairs: print("[-] No valid titles."); return
 
-    print(f"[*] Broward library ID : {broward_library_id}")
+    print(f"[*] Broward library ID  : {broward_library_id}")
     print(f"[*] Broward branch count: {len(branch_map)}")
     print(f"[*] Scraping {len(pairs)} title(s)…\n")
 
@@ -348,7 +431,7 @@ def process_batch(args: argparse.Namespace) -> None:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         csv_file   = open(out_path, "w", newline="", encoding="utf-8")
         csv_writer = csv.writer(csv_file)
-        csv_writer.writerow(["Title", "Author", "ItemID", "Library", "Status", "OnShelf"])
+        csv_writer.writerow(["Title", "Author", "ItemID", "Volume", "Library", "Status", "OnShelf"])
         print(f"[*] CSV → {out_path}\n")
 
     db_conn = _get_db()
@@ -366,34 +449,45 @@ def process_batch(args: argparse.Namespace) -> None:
         if not item_ids:
             print("  [-] No catalog entries found"); continue
 
-        all_copies: list[dict] = []
+        # Fetch detail + copies for each item
+        item_copies: list[tuple[int, list[dict]]] = []
         for item_id in item_ids:
-            copies = fetch_item_copies(session, item_id, title, author, args.debug)
-            all_copies.extend(copies)
+            volume, copies = fetch_item_detail(session, item_id, title, author, args.debug)
+            item_copies.append((volume, copies))
             if csv_writer:
                 for c in copies:
-                    csv_writer.writerow([title, author, item_id, c["library"],
+                    csv_writer.writerow([title, author, item_id, volume, c["library"],
                                          c["status"], "Yes" if c["on_shelf"] else "No"])
             time.sleep(1.2)
 
-        # Aggregate to one status per branch
-        branch_statuses = copies_to_branch_statuses(all_copies, branch_map, args.debug)
+        # Aggregate: {volume -> {branch_id -> best_status}}
+        volume_branch_map = build_volume_branch_map(item_copies, branch_map, args.debug)
 
-        avail_branches = sum(1 for b in branch_statuses if b["status"] == "Available")
-        total_branches = len(branch_statuses)
-        total_copies   = len(all_copies)
-        print(f"  [{'✓' if avail_branches else '✗'}] "
-              f"{avail_branches}/{total_branches} branches available "
-              f"({total_copies} total copies)")
+        # Summary
+        total_vols    = len(volume_branch_map)
+        avail_vols    = sum(
+            1 for statuses in volume_branch_map.values()
+            if any(s == "Available" for s in statuses.values())
+        )
+        total_copies  = sum(len(c) for _, c in item_copies)
+        vol_list      = sorted(volume_branch_map.keys())
+        vol_display   = str(vol_list) if len(vol_list) <= 10 else f"{vol_list[:5]}…"
+        print(
+            f"  [{'✓' if avail_vols else '✗'}] "
+            f"{avail_vols}/{total_vols} vols available "
+            f"({total_copies} copies) — vols {vol_display}"
+        )
 
         if args.debug:
-            for b in branch_statuses:
-                mark = "✓" if b["status"] == "Available" else ("~" if b["status"] == "On Hold" else "✗")
-                print(f"  [{mark}] {b['branch_name']} — {b['status']}")
+            for vol_num, branch_statuses in sorted(volume_branch_map.items()):
+                for bid, status in branch_statuses.items():
+                    bname = next((k for k, v in branch_map.items() if v == bid), str(bid))
+                    mark = "✓" if status == "Available" else ("~" if status == "On Hold" else "✗")
+                    print(f"  [{mark}] vol {vol_num} @ {bname} — {status}")
 
-        if branch_statuses:
+        if volume_branch_map:
             try:
-                msg = _upsert_broward_results(cursor, manga_id, broward_library_id, branch_statuses)
+                msg = _upsert_broward_results(cursor, manga_id, broward_library_id, volume_branch_map)
                 db_conn.commit()
                 print(f"  [DB] {msg}")
             except Exception as e:
@@ -408,7 +502,7 @@ def process_batch(args: argparse.Namespace) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Broward County Library manga scraper",
+        description="Broward County Library manga scraper — volume-aware",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )

@@ -57,10 +57,10 @@ def _run_subprocess(job_name: str, cmd: list) -> None:
     ok = proc.returncode == 0
     with _jobs_lock:
         _jobs[job_name].update(
-            running=False,
-            progress=100 if ok else progress,
-            message=last_msg if ok else f'error: exited {proc.returncode}',
-        )
+                running=False,
+                progress=100 if ok else progress,
+                message=last_msg if ok else f'error: exited {proc.returncode}',
+                )
     _append_job_history(job_name, 'done' if ok else 'error', last_msg)
 
 def _start_job(job_name: str, cmd: list) -> tuple[bool, int, str]:
@@ -99,7 +99,7 @@ def _append_job_history(job: str, status: str, message: str) -> None:
                     'at': datetime.utcnow().isoformat()})
     try:
         JOB_HISTORY_PATH.write_text(
-            json.dumps(history[-200:], indent=2, ensure_ascii=False), encoding='utf-8')
+                json.dumps(history[-200:], indent=2, ensure_ascii=False), encoding='utf-8')
     except Exception:
         pass
 
@@ -128,12 +128,12 @@ def _missing_indices(library_pattern: str) -> list:
     try:
         manga_ids = [r['MangaID'] for r in execute_query("SELECT MangaID FROM manga ORDER BY MangaID")]
         scraped = {r['MangaID'] for r in execute_query(f"""
-            SELECT DISTINCT a.MangaID FROM availability a
-            JOIN branch_availability_status bas ON a.AvailabilityID = bas.AvailabilityID
-            JOIN branch b ON bas.BranchID = b.BranchID
-            JOIN library l ON b.LibraryID = l.LibraryID
-            WHERE l.LibraryName LIKE '{library_pattern}'
-        """)}
+                                                       SELECT DISTINCT a.MangaID FROM availability a
+                                                       JOIN branch_availability_status bas ON a.AvailabilityID = bas.AvailabilityID
+                                                       JOIN branch b ON bas.BranchID = b.BranchID
+                                                       JOIN library l ON b.LibraryID = l.LibraryID
+                                                       WHERE l.LibraryName LIKE '{library_pattern}'
+                                                       """)}
         return [i + 1 for i, mid in enumerate(manga_ids) if mid not in scraped]
     except Exception:
         return []
@@ -229,37 +229,37 @@ DROP TABLE IF EXISTS branch;
 DROP TABLE IF EXISTS manga;
 DROP TABLE IF EXISTS library;
 CREATE TABLE manga (
-    MangaID INT PRIMARY KEY, Title VARCHAR(255) NOT NULL, `Type` VARCHAR(50),
-    Volumes INT, Members INT, Score DECIMAL(4,2), Author VARCHAR(255),
-    CoverMedium VARCHAR(512), CoverLarge VARCHAR(512)
-);
+        MangaID INT PRIMARY KEY, Title VARCHAR(255) NOT NULL, `Type` VARCHAR(50),
+        Volumes INT, Members INT, Score DECIMAL(4,2), Author VARCHAR(255),
+        CoverMedium VARCHAR(512), CoverLarge VARCHAR(512)
+        );
 CREATE TABLE library (
-    LibraryID INT PRIMARY KEY AUTO_INCREMENT,
-    LibraryName VARCHAR(255) NOT NULL, `URL` VARCHAR(255) NOT NULL
-);
+        LibraryID INT PRIMARY KEY AUTO_INCREMENT,
+        LibraryName VARCHAR(255) NOT NULL, `URL` VARCHAR(255) NOT NULL
+        );
 CREATE TABLE branch (
-    BranchID INT PRIMARY KEY AUTO_INCREMENT, BranchName VARCHAR(255) NOT NULL,
-    `Address` VARCHAR(255), LibraryID INT NOT NULL,
-    FOREIGN KEY (LibraryID) REFERENCES library(LibraryID) ON DELETE CASCADE
-);
+        BranchID INT PRIMARY KEY AUTO_INCREMENT, BranchName VARCHAR(255) NOT NULL,
+        `Address` VARCHAR(255), LibraryID INT NOT NULL,
+        FOREIGN KEY (LibraryID) REFERENCES library(LibraryID) ON DELETE CASCADE
+        );
 CREATE TABLE availability (
-    AvailabilityID INT AUTO_INCREMENT PRIMARY KEY,
-    MangaID INT NOT NULL, Volume INT NOT NULL,
-    FOREIGN KEY (MangaID) REFERENCES manga(MangaID) ON DELETE CASCADE
-);
+        AvailabilityID INT AUTO_INCREMENT PRIMARY KEY,
+        MangaID INT NOT NULL, Volume INT NOT NULL,
+        FOREIGN KEY (MangaID) REFERENCES manga(MangaID) ON DELETE CASCADE
+        );
 CREATE TABLE branch_availability_status (
-    BranchStatusID INT AUTO_INCREMENT PRIMARY KEY,
-    AvailabilityID INT NOT NULL, BranchID INT NOT NULL, `Status` VARCHAR(100) NOT NULL,
-    FOREIGN KEY (AvailabilityID) REFERENCES availability(AvailabilityID) ON DELETE CASCADE,
-    FOREIGN KEY (BranchID) REFERENCES branch(BranchID) ON DELETE CASCADE
-)
+        BranchStatusID INT AUTO_INCREMENT PRIMARY KEY,
+        AvailabilityID INT NOT NULL, BranchID INT NOT NULL, `Status` VARCHAR(100) NOT NULL,
+        FOREIGN KEY (AvailabilityID) REFERENCES availability(AvailabilityID) ON DELETE CASCADE,
+        FOREIGN KEY (BranchID) REFERENCES branch(BranchID) ON DELETE CASCADE
+        )
 """
 
 INSERT_OPS = [
-    ("manga.csv",     "INSERT INTO manga (MangaID, Title, Type, Volumes, Members, Score, Author, CoverMedium, CoverLarge) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)"),
-    ("libraries.csv", "INSERT INTO library (LibraryName, `URL`) VALUES (%s,%s)"),
-    ("branches.csv",  "INSERT INTO branch (BranchName, `Address`, LibraryID) VALUES (%s,%s,%s)"),
-]
+        ("manga.csv",     "INSERT INTO manga (MangaID, Title, Type, Volumes, Members, Score, Author, CoverMedium, CoverLarge) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)"),
+        ("libraries.csv", "INSERT INTO library (LibraryName, `URL`) VALUES (%s,%s)"),
+        ("branches.csv",  "INSERT INTO branch (BranchName, `Address`, LibraryID) VALUES (%s,%s,%s)"),
+        ]
 
 def insert_csv(filename, query):
     filepath = DATA_DIR / filename
@@ -306,16 +306,16 @@ def admin():
         return _handle_admin_post()
 
     manga_per_library = execute_query("""
-        SELECT l.LibraryName, b.BranchName,
-               COUNT(DISTINCT CONCAT(a.MangaID,'-',a.Volume)) AS VolumeCount
-        FROM branch b
-        JOIN library l ON b.LibraryID = l.LibraryID
-        JOIN branch_availability_status bas ON b.BranchID = bas.BranchID
-        JOIN availability a ON bas.AvailabilityID = a.AvailabilityID
-        GROUP BY l.LibraryName, b.BranchName
-        HAVING COUNT(DISTINCT CONCAT(a.MangaID,'-',a.Volume)) > 0
-        ORDER BY l.LibraryName, VolumeCount DESC
-    """)
+                                      SELECT l.LibraryName, b.BranchName,
+                                      COUNT(DISTINCT CONCAT(a.MangaID,'-',a.Volume)) AS VolumeCount
+                                      FROM branch b
+                                      JOIN library l ON b.LibraryID = l.LibraryID
+                                      JOIN branch_availability_status bas ON b.BranchID = bas.BranchID
+                                      JOIN availability a ON bas.AvailabilityID = a.AvailabilityID
+                                      GROUP BY l.LibraryName, b.BranchName
+                                      HAVING COUNT(DISTINCT CONCAT(a.MangaID,'-',a.Volume)) > 0
+                                      ORDER BY l.LibraryName, VolumeCount DESC
+                                      """)
     return render_template('admin.html',
                            manga_per_library=manga_per_library,
                            job_history=list(reversed(_read_job_history()))[:30])
@@ -330,9 +330,9 @@ def _handle_admin_post():
 
     if action == 'delete':
         execute_update(
-            'DELETE FROM availability WHERE MangaID = '
-            '(SELECT MangaID FROM manga WHERE Title = %s) AND Volume = %s',
-            (request.form.get('title'), request.form.get('volume')))
+                'DELETE FROM availability WHERE MangaID = '
+                '(SELECT MangaID FROM manga WHERE Title = %s) AND Volume = %s',
+                (request.form.get('title'), request.form.get('volume')))
         return jsonify({'ok': True, 'message': 'Volume deleted'})
 
     if action in ('scrape', 'scrape_broward'):
@@ -435,8 +435,8 @@ def api_suggestions():
         return jsonify([])
     try:
         rows = execute_query(
-            'SELECT Title, Type, Score FROM manga WHERE Title LIKE %s ORDER BY Score DESC LIMIT 8',
-            (f'%{q}%',))
+                'SELECT Title, Type, Score FROM manga WHERE Title LIKE %s ORDER BY Score DESC LIMIT 8',
+                (f'%{q}%',))
         return jsonify([{'title': r['Title'], 'type': r['Type'],
                          'score': str(r['Score'] or '')} for r in rows])
     except Exception:
@@ -476,7 +476,7 @@ def api_missing_titles():
         'count':         len(_missing_indices('%Leon%')),
         'broward_count': len(_missing_indices('%Broward%')),
         'total_titles':  total,
-    })
+        })
 
 @app.route('/api/title_index')
 @admin_required
@@ -514,26 +514,45 @@ def api_delete_title_results():
 def api_title_volumes(manga_id):
     try:
         rows = execute_query("""
-            SELECT a.Volume, a.AvailabilityID,
-                   GROUP_CONCAT(
-                       CONCAT(b.BranchName, ': ', bas.Status)
-                       ORDER BY b.BranchName SEPARATOR ' | '
-                   ) AS branches
-            FROM availability a
-            LEFT JOIN branch_availability_status bas ON a.AvailabilityID = bas.AvailabilityID
-            LEFT JOIN branch b ON bas.BranchID = b.BranchID
-            WHERE a.MangaID = %s
-            GROUP BY a.AvailabilityID, a.Volume
-            ORDER BY a.Volume
-        """, (manga_id,))
+                             SELECT a.Volume, a.AvailabilityID,
+                             GROUP_CONCAT(
+                                 CONCAT(b.BranchName, ': ', bas.Status)
+                                 ORDER BY b.BranchName SEPARATOR ' | '
+                                 ) AS branches
+                             FROM availability a
+                             LEFT JOIN branch_availability_status bas ON a.AvailabilityID = bas.AvailabilityID
+                             LEFT JOIN branch b ON bas.BranchID = b.BranchID
+                             WHERE a.MangaID = %s
+                             GROUP BY a.AvailabilityID, a.Volume
+                             ORDER BY a.Volume
+                             """, (manga_id,))
         return jsonify(rows)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 # ── Search ─────────────────────────────────────────────────────────────────────
 
+# ── Search ─────────────────────────────────────────────────────────────────────
+#
+# PATCH: Replace the entire search() route in backend.py with this version.
+# Key change: lib_data now tracks volumes → {branch_id: status} instead of
+# collapsing everything to branch → status, so Broward gets the same vol grid as LCPL.
+
 ON_SHELF = ('Graphic Novel', 'Youth Fiction', 'Adult Non-Fiction', 'Available',
             'General Collection', 'New Materials')
+
+STATUS_PRIORITY = {'Available': 2, 'On Hold': 1, 'Checked Out': 0}
+
+def _normalize_status(raw: str) -> str:
+    """Collapse any raw catalog status string into one of three display values."""
+    if not raw:
+        return 'Checked Out'
+    if any(kw in raw for kw in ON_SHELF):
+        return 'Available'
+    if 'hold' in raw.lower():
+        return 'On Hold'
+    return 'Checked Out'
+
 
 @app.route('/search')
 def search():
@@ -545,7 +564,7 @@ def search():
     avail_filter = request.args.get('avail',   '')
     lib_filter   = request.args.get('library', '')
 
-    conditions = ['b.BranchName IS NOT NULL']
+    conditions = ['b.BranchName IS NOT NULL', 'b.BranchID IS NOT NULL']
     params = []
     if title:      conditions.append('m.Title LIKE %s');     params.append(f'%{title}%')
     if type_:      conditions.append('m.Type = %s');         params.append(type_)
@@ -557,75 +576,111 @@ def search():
     sql = f"""
         SELECT m.MangaID, m.Title, a.Volume, m.Volumes, m.Type,
                m.Members, m.Score, m.Author, m.CoverMedium,
-               b.BranchName, bas.Status, b.LibraryID, l.LibraryName
+               b.BranchName, b.BranchID, bas.Status, b.LibraryID, l.LibraryName
         FROM manga m
-        LEFT JOIN availability a                 ON m.MangaID = a.MangaID
-        LEFT JOIN branch_availability_status bas ON a.AvailabilityID = bas.AvailabilityID
-        LEFT JOIN branch b                       ON bas.BranchID = b.BranchID
-        LEFT JOIN library l                      ON b.LibraryID = l.LibraryID
+        JOIN availability a                  ON m.MangaID = a.MangaID
+        JOIN branch_availability_status bas  ON a.AvailabilityID = bas.AvailabilityID
+        JOIN branch b                        ON bas.BranchID = b.BranchID
+        JOIN library l                       ON b.LibraryID = l.LibraryID
         WHERE {' AND '.join(conditions)}
-        ORDER BY m.Score DESC, a.Volume ASC
+        ORDER BY m.Score DESC, a.Volume ASC, b.BranchName ASC
     """
     rows = execute_query(sql, params)
 
     if avail_filter == 'available':
-        rows = [r for r in rows if any(kw in (r.get('Status') or '') for kw in ON_SHELF)]
+        rows = [r for r in rows if _normalize_status(r.get('Status') or '') == 'Available']
 
-    # Group by title → library → branch (best status per branch)
+    # ── Group: title → library → volume → {branch_id: status} ────────────────
     titles_map: dict = {}
     for r in rows:
-        t = r['Title']
+        t   = r['Title']
+        lid = r['LibraryID']
+        bid = r['BranchID']
+        if lid is None or bid is None:
+            continue  # skip malformed rows
+
         if t not in titles_map:
             titles_map[t] = {
-                'MangaID': r['MangaID'], 'Title': t, 'Volumes': r['Volumes'],
-                'Type': r['Type'], 'Members': r['Members'], 'Score': r['Score'],
-                'author': r.get('Author') or '', 'cover': r.get('CoverMedium') or '',
-                'lib_data': {},
-                'has_lcpl': False, 'has_broward': False,
-            }
-        lid    = r.get('LibraryID')
-        bname  = r['BranchName']
-        status = r.get('Status') or ''
-        vol    = r['Volume']
+                    'MangaID': r['MangaID'], 'Title': t, 'Volumes': r['Volumes'],
+                    'Type': r['Type'], 'Members': r['Members'], 'Score': r['Score'],
+                    'author': r.get('Author') or '', 'cover': r.get('CoverMedium') or '',
+                    'lib_data': {},
+                    'has_lcpl': False, 'has_broward': False,
+                    }
 
         td = titles_map[t]
         td['lib_data'].setdefault(lid, {
             'library_id':   lid,
             'library_name': ('Broward County Library' if lid == BROWARD_LIBRARY_ID
                              else 'Leon County Public Library'),
-            'branches': {},
-        })
+            'volumes':      {},   # vol_num -> {branch_id -> normalized_status}
+            'branch_names': {},   # branch_id -> BranchName string
+            })
         ld = td['lib_data'][lid]
 
-        # Keep highest-priority status per branch
-        existing = ld['branches'].get(bname)
-        if existing is None or _status_priority(status) > _status_priority(existing['status']):
-            ld['branches'][bname] = {
-                'name':   bname,
-                'short':  _branch_short(bname, lid, BROWARD_LIBRARY_ID),
-                'status': status,
-            }
+        vol         = r['Volume'] if r['Volume'] is not None else 0
+        norm_status = _normalize_status(r.get('Status') or '')
+
+        ld['volumes'].setdefault(vol, {})
+        current = ld['volumes'][vol].get(bid)
+        new_pri = STATUS_PRIORITY[norm_status]
+        cur_pri = STATUS_PRIORITY.get(current, -1)
+        if current is None or new_pri > cur_pri:
+            ld['volumes'][vol][bid] = norm_status
+
+        ld['branch_names'][bid] = r['BranchName']
 
         if lid == BROWARD_LIBRARY_ID: td['has_broward'] = True
         elif lid == LCPL_LIBRARY_ID:  td['has_lcpl']    = True
 
+    # ── Build final grouped list ───────────────────────────────────────────────
     grouped = []
     for td in titles_map.values():
         avail_count = out_count = hold_count = 0
         lib_list = []
 
         for linfo in sorted(td['lib_data'].values(), key=lambda x: x['library_id']):
-            branch_list = sorted(linfo['branches'].values(), key=lambda x: x['name'])
-            for b in branch_list:
-                s = b['status']
-                if any(kw in s for kw in ON_SHELF): avail_count += 1
-                elif 'hold' in s.lower():           hold_count  += 1
-                elif s:                             out_count   += 1
+            branch_best: dict[int, str] = {}
+
+            vol_list = []
+            for vol_num in sorted(linfo['volumes'].keys()):
+                branch_statuses = linfo['volumes'][vol_num]
+                vol_branches = []
+                for bid in sorted(branch_statuses.keys(),
+                                  key=lambda b: linfo['branch_names'].get(b, '')):
+                    status = branch_statuses[bid]
+                    bname  = linfo['branch_names'].get(bid, '')
+                    vol_branches.append({
+                        'name':   bname,
+                        'short':  _branch_short(bname, linfo['library_id'], BROWARD_LIBRARY_ID),
+                        'status': status,
+                        })
+                    if status == 'Available':  avail_count += 1
+                    elif status == 'On Hold':  hold_count  += 1
+                    else:                      out_count   += 1
+
+                    cur_best = branch_best.get(bid)
+                    if cur_best is None or STATUS_PRIORITY[status] > STATUS_PRIORITY.get(cur_best, -1):
+                        branch_best[bid] = status
+
+                vol_list.append({'vol': vol_num, 'branches': vol_branches})
+
+            branch_list = []
+            for bid in sorted(branch_best.keys(),
+                              key=lambda b: linfo['branch_names'].get(b, '')):
+                bname = linfo['branch_names'].get(bid, '')
+                branch_list.append({
+                    'name':   bname,
+                    'short':  _branch_short(bname, linfo['library_id'], BROWARD_LIBRARY_ID),
+                    'status': branch_best[bid],
+                    })
+
             lib_list.append({
                 'library_id':   linfo['library_id'],
                 'library_name': linfo['library_name'],
                 'branch_list':  branch_list,
-            })
+                'vol_list':     vol_list,
+                })
 
         grouped.append({
             'MangaID':     td['MangaID'],
@@ -639,11 +694,11 @@ def search():
             'has_lcpl':    td['has_lcpl'],
             'has_broward': td['has_broward'],
             'lib_list':    lib_list,
-            'vol_count':   len(td['lib_data']),   # number of libraries with data
+            'vol_count':   sum(len(linfo['volumes']) for linfo in td['lib_data'].values()),
             'avail_count': avail_count,
             'out_count':   out_count,
             'hold_count':  hold_count,
-        })
+            })
 
     filters = {'title': title, 'type': type_, 'branch': branch,
                'volume': volume, 'avail': avail_filter, 'library': lib_filter}
@@ -655,18 +710,18 @@ def search():
 # ── Jinja2 filters ─────────────────────────────────────────────────────────────
 
 _COVER_PALETTES = [
-    ('hsl(260,40%,14%)', 'hsl(260,60%,55%)'), ('hsl(340,40%,13%)', 'hsl(340,60%,55%)'),
-    ('hsl(200,45%,12%)', 'hsl(200,65%,50%)'), ('hsl(30, 50%,13%)', 'hsl(30, 70%,55%)'),
-    ('hsl(150,40%,12%)', 'hsl(150,55%,46%)'), ('hsl(290,35%,14%)', 'hsl(290,55%,58%)'),
-    ('hsl(10, 45%,13%)', 'hsl(10, 65%,55%)'), ('hsl(220,42%,14%)', 'hsl(220,62%,58%)'),
-]
+        ('hsl(260,40%,14%)', 'hsl(260,60%,55%)'), ('hsl(340,40%,13%)', 'hsl(340,60%,55%)'),
+        ('hsl(200,45%,12%)', 'hsl(200,65%,50%)'), ('hsl(30, 50%,13%)', 'hsl(30, 70%,55%)'),
+        ('hsl(150,40%,12%)', 'hsl(150,55%,46%)'), ('hsl(290,35%,14%)', 'hsl(290,55%,58%)'),
+        ('hsl(10, 45%,13%)', 'hsl(10, 65%,55%)'), ('hsl(220,42%,14%)', 'hsl(220,62%,58%)'),
+        ]
 
 @app.template_filter('cover_gradient')
 def cover_gradient_filter(manga_id):
     idx = int(manga_id or 0) % len(_COVER_PALETTES)
     base, accent = _COVER_PALETTES[idx]
     return (f'background: linear-gradient(160deg, {base} 0%, '
-            f'color-mix(in srgb, {accent} 18%, {base}) 100%);')
+                                          f'color-mix(in srgb, {accent} 18%, {base}) 100%);')
 
 app.jinja_env.filters['urlencode'] = lambda s: _quote_plus(str(s or ''))
 

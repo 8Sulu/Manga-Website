@@ -262,5 +262,83 @@
     "status": "done",
     "message": "[*] Done.",
     "at": "2026-05-31T20:28:46.628580"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-01T00:31:10.480458"
+  },
+  {
+    "job": "reset",
+    "status": "done",
+    "message": "✓ Schema recreated · ✓ manga.csv · ✓ libraries.csv · ✓ branches.csv",
+    "at": "2026-06-01T00:37:51.309095"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-01T00:38:14.662275"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 0 LCPL availability rows",
+    "at": "2026-06-01T00:44:53.565896"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-01T00:45:08.001217"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 0 LCPL availability rows",
+    "at": "2026-06-01T00:48:06.381510"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-01T00:56:28.950605"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 0 LCPL availability rows",
+    "at": "2026-06-01T01:03:52.708918"
+  },
+  {
+    "job": "reset",
+    "status": "done",
+    "message": "✓ Schema recreated · ✓ manga.csv · ✓ libraries.csv · ✓ branches.csv",
+    "at": "2026-06-01T01:39:22.945734"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 0 LCPL availability rows",
+    "at": "2026-06-01T01:41:02.677494"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-01T01:43:32.481975"
+  },
+  {
+    "job": "reset",
+    "status": "done",
+    "message": "✓ Schema recreated · ✓ manga.csv · ✓ libraries.csv · ✓ branches.csv",
+    "at": "2026-06-01T01:47:55.645737"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 0 LCPL availability rows",
+    "at": "2026-06-01T01:52:47.040654"
   }
 ]
