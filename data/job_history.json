@@ -418,5 +418,17 @@
     "status": "done",
     "message": "[*] Done.",
     "at": "2026-06-01T22:11:11.848768+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "error",
+    "message": "INFO   Found 47 catalog item(s)",
+    "at": "2026-06-01T22:22:27.460175+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-01T23:46:22.011896+00:00"
   }
 ]
