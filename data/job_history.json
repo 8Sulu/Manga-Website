@@ -430,5 +430,47 @@
     "status": "done",
     "message": "[*] Done.",
     "at": "2026-06-01T23:46:22.011896+00:00"
+  },
+  {
+    "job": "reset",
+    "status": "done",
+    "message": "✓ Schema recreated · ✓ manga.csv · ✓ libraries.csv · ✓ branches.csv",
+    "at": "2026-06-02T08:20:53.926319+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-02T08:21:11.562144+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "no books to write",
+    "at": "2026-06-02T08:37:03.654260+00:00"
+  },
+  {
+    "job": "reset",
+    "status": "done",
+    "message": "✓ Schema recreated · ✓ manga.csv · ✓ libraries.csv · ✓ branches.csv",
+    "at": "2026-06-02T08:37:36.279761+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "error",
+    "message": "ValueError: too many values to unpack (expected 2, got 6)",
+    "at": "2026-06-02T08:38:43.735534+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "error",
+    "message": "ValueError: too many values to unpack (expected 2, got 6)",
+    "at": "2026-06-02T08:38:52.375070+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "error",
+    "message": "ValueError: too many values to unpack (expected 2, got 6)",
+    "at": "2026-06-02T08:39:41.223075+00:00"
   }
 ]
