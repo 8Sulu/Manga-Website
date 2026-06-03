@@ -515,6 +515,7 @@ async function doReset() {
 
 // ── Clear title availability (with confirm + undo) ─────────────
 let _lastClearedTitle = null;
+let _lastClearedMangaID = null;
 
 async function deleteTitleResultsConfirmed() {
   const title   = document.getElementById('del-results-title').value.trim();
@@ -543,6 +544,7 @@ async function deleteTitleResultsConfirmed() {
 
     if (d.ok) {
       _lastClearedTitle = title;
+      _lastClearedMangaID = mangaID;
       document.getElementById('del-results-title-saved').textContent = title;
       undoEl.classList.add('visible');
       loadStats();
@@ -554,13 +556,6 @@ async function deleteTitleResultsConfirmed() {
   }
 }
 
-async function undoClear() {
-  if (!_lastClearedTitle) return;
-  const title = _lastClearedTitle;
-  document.getElementById('del-results-undo').classList.remove('visible');
-  await rescrapeByTitle(title, 'scrape');
-  await rescrapeByTitle(title, 'scrape_broward');
-}
 
 // ── Batch search + re-scrape ───────────────────────────────────
 let batchDebounce;
@@ -575,20 +570,24 @@ async function batchSearch(q) {
     try {
       const items = await fetch(`/api/suggestions?q=${encodeURIComponent(q)}`).then(r => r.json());
       el.innerHTML = items.length
-        ? items.map(item => `
+        ? items.map(item => {
+            const safeTitle = item.title.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            
+            return `
             <div class="batch-title-row">
               <span class="batch-title-name">${item.title}</span>
               <span class="batch-title-meta">${item.type || ''} ${item.score ? '· ★ ' + parseFloat(item.score).toFixed(2) : ''}</span>
-              <button onclick="clearBatchTitle('${item.title.replace(/'/g, "\\'").replace(/"/g, '&quot;')}')" class="danger" style="font-size:.6rem;padding:2px 7px;margin-left:6px">Clear</button>
-              <button onclick="rescrapeByTitle('${item.title.replace(/'/g, "\\'").replace(/"/g, '&quot;')}','scrape')" class="btn-rescrape">↺ LCPL</button>
-              <button onclick="rescrapeByTitle('${item.title.replace(/'/g, "\\'").replace(/"/g, '&quot;')}','scrape_broward')" class="btn-rescrape btn-rescrape-broward">↺ BCL</button>
-            </div>`).join('')
+              <button onclick="clearBatchTitle(${item.manga_id}, '${safeTitle}')" class="danger" style="font-size:.6rem;padding:2px 7px;margin-left:6px">Clear</button>
+              <button onclick="rescrapeById(${item.manga_id}, '${safeTitle}', 'scrape')" class="btn-rescrape">↺ LCPL</button>
+              <button onclick="rescrapeById(${item.manga_id}, '${safeTitle}', 'scrape_broward')" class="btn-rescrape btn-rescrape-broward">↺ BCL</button>
+            </div>`;
+          }).join('')
         : '<div style="font-family:var(--mono);font-size:.7rem;color:var(--text3);padding:.6rem .75rem">No results</div>';
     } catch {}
   }, 250);
 }
 
-async function clearBatchTitle(title) {
+async function clearBatchTitle(mangaID, title) {
   if (!confirm(`Clear all availability data for "${title}"?`)) return;
   try {
     const d = await fetch('/api/delete_title_results', {
@@ -597,25 +596,24 @@ async function clearBatchTitle(title) {
         'Content-Type': 'application/json',
         'X-CSRF-Token': getCsrf(),
       },
-      body: JSON.stringify({title})
+      // Send the exact ID
+      body: JSON.stringify({ manga_id: mangaID }) 
     }).then(r => r.json());
+    
     toast(d.message, d.ok ? 'ok' : 'err');
     if (d.ok) { loadStats(); loadMissingCount(); }
   } catch(e) { toast('Error: ' + e.message, 'err'); }
 }
 
-async function rescrapeByTitle(title, action = 'scrape') {
+// Replace rescrapeByTitle / rescrapeById with this simplified version:
+async function rescrapeById(mangaId, title, action = 'scrape') {
   try {
-    const d = await fetch(`/api/title_index?title=${encodeURIComponent(title)}`).then(r => r.json());
-    if (!d.index) { toast(`No index found for "${title}"`, 'err'); return; }
-
     if (pollers[action]) { toast(`A ${action.replace(/_/g, ' ')} is already running`, 'err'); return; }
 
     const form = new FormData();
-    form.append('action',      action);
-    form.append('range',       d.index + '-' + d.index);
-    form.append('only_new',    '0');
-    form.append('csrf_token',  getCsrf());
+    form.append('action',     action);
+    form.append('manga_id',   mangaId); // Send ID directly! No more 'range' hack.
+    form.append('csrf_token', getCsrf());
 
     const btn     = document.getElementById('btn-' + action);
     const stopBtn = document.getElementById('stop-' + action);
@@ -636,6 +634,21 @@ async function rescrapeByTitle(title, action = 'scrape') {
     updateStickyFooter(action, 0, 'starting…', true);
     pollers[action] = setInterval(() => pollJob(action, btn, stopBtn), POLL_MS);
   } catch(e) { toast('Re-scrape failed: ' + e.message, 'err'); }
+}
+
+// Update undoClear to properly pass mangaId
+async function undoClear() {
+  if (!_lastClearedTitle || !_lastClearedMangaId) return;
+  const title = _lastClearedTitle;
+  const mangaId = _lastClearedMangaId;
+  
+  document.getElementById('del-results-undo').classList.remove('visible');
+  
+  await rescrapeById(mangaId, title, 'scrape');
+  await rescrapeById(mangaId, title, 'scrape_broward');
+  
+  _lastClearedTitle = null;
+  _lastClearedMangaId = null;
 }
 
 // ── Job history ────────────────────────────────────────────────

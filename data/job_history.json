@@ -622,5 +622,221 @@
     "status": "done",
     "message": "inserted 4 LCPL availability rows",
     "at": "2026-06-03T03:32:56.564352+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 2 LCPL availability rows",
+    "at": "2026-06-03T03:46:43.836409+00:00"
+  },
+  {
+    "job": "reset",
+    "status": "done",
+    "message": "✓ Schema recreated · ✓ manga.csv · ✓ libraries.csv · ✓ branches.csv",
+    "at": "2026-06-03T03:57:55.206500+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 2 LCPL availability rows",
+    "at": "2026-06-03T03:58:01.949015+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 2 LCPL availability rows",
+    "at": "2026-06-03T04:03:03.373155+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 2 LCPL availability rows",
+    "at": "2026-06-03T04:04:15.636752+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T04:05:42.510350+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T04:05:55.877212+00:00"
+  },
+  {
+    "job": "reset",
+    "status": "done",
+    "message": "✓ Schema recreated · ✓ manga.csv · ✓ libraries.csv · ✓ branches.csv",
+    "at": "2026-06-03T04:18:25.605781+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "no books to write",
+    "at": "2026-06-03T04:18:48.283432+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "no books to write",
+    "at": "2026-06-03T04:18:53.899947+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T04:25:39.764282+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T04:25:47.217540+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T04:25:59.958952+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T04:26:12.861954+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T04:26:15.821223+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T04:26:29.347961+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T04:26:35.536305+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T04:34:08.311611+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T04:34:15.803612+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 2 LCPL availability rows",
+    "at": "2026-06-03T04:34:47.415081+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T04:35:14.164455+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T04:35:22.277812+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T04:36:04.337063+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T04:36:08.051408+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T04:48:54.288324+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T04:49:10.827099+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T04:50:19.395844+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T04:50:44.790868+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T04:54:27.542271+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T04:54:41.825437+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 32 LCPL availability rows",
+    "at": "2026-06-03T04:55:39.649139+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T04:55:47.497220+00:00"
+  },
+  {
+    "job": "reset",
+    "status": "done",
+    "message": "✓ Schema recreated · ✓ manga.csv · ✓ libraries.csv · ✓ branches.csv",
+    "at": "2026-06-03T05:32:09.961247+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T05:32:17.895896+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T05:32:23.424104+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 2 LCPL availability rows",
+    "at": "2026-06-03T05:32:38.544305+00:00"
   }
 ]

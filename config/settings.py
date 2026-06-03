@@ -55,6 +55,46 @@ BRANCH_MAPPING = {
     "WOODVILLE": 7,
 }
 
+# ── Broward branch mapping ──────────────────────────────────────────────────
+# Maps the names returned by the library catalog to your database entry names
+BROWARD_BRANCH_MAPPING = {
+    "African-American Research Library": "African American Research Library & Cultural Center",
+    "Beach Branch Library": "Beach Branch",
+    "Carver Ranches Branch Library": "Carver Ranches Branch",
+    "Century Plaza Branch Library": "Century Plaza/Leon Slatin Branch",
+    "Dania Beach Paul DeMaio Branch Library": "Dania Beach Paul DeMaio Branch",
+    "Davie Cooper City Branch Library": "Davie/Cooper City Branch",
+    "Deerfield Beach P. White Branch Library": "Deerfield Beach Percy White Branch",
+    "Fort Lauderdale Reading Center": "Fort Lauderdale Reading Center",
+    "Galt Ocean Mile Branch Library": "Galt Ocean Mile Reading Center",
+    "Hallandale Beach Branch Library": "Hallandale Beach Branch",
+    "Hollywood Bernice P Oster Reading Center": "Hollywood Beach Bernice P. Oster Branch",
+    "Hollywood Branch Library": "Hollywood Branch",
+    "Imperial Point Branch Library": "Imperial Point Branch",
+    "Jan Moran Collier City Learning Library": "Jan Moran Collier City Learning Library",
+    "Lauderdale Lakes Branch": "Lauderdale Lakes Library/Educational & Cultural Center",
+    "Lauderhill Central Park Library": "Lauderhill Central Park Library",
+    "Lauderhill Towne Centre Library": "Lauderhill Towne Centre Branch",
+    "Main Library": "Main Library",
+    "Margate Catharine Young Library": "Margate Catharine Young Branch",
+    "Marta-Beth Friedman Stirling Road Branch": "Marta,Beth Friedman Stirling Road Branch",
+    "Miramar Branch Library and Ed Center": "Miramar Branch Library & Education Center",
+    "North Lauderdale Saraniero Branch": "North Lauderdale Saraniero Branch",
+    "North Regional/BC Library": "North Regional/Broward College Library",
+    "Northwest Branch": "Northwest Branch",
+    "Northwest Regional Library": "Northwest Regional Library",
+    "Pembroke Pines/Walter C. Young Branch": "Pembroke Pines/Walter C. Young Resource Center",
+    "Pompano Beach Branch": "Pompano Beach Library & Cultural Center",
+    "Riverland Branch": "Riverland Branch",
+    "South Regional/Broward College Library": "South Regional/Broward College Library",
+    "Southwest Regional Library": "Southwest Regional Library",
+    "Sunrise Dan Pearl Branch": "Sunrise Dan Pearl Branch",
+    "Tamarac Branch": "Tamarac Branch",
+    "Tyrone Bryant Branch Library": "Tyrone Bryant Branch",
+    "West Regional Library": "West Regional Library",
+    "Weston Branch": "Weston Branch",
+}
+
 # Broward uses a single virtual branch (no per-branch breakdown)
 BROWARD_LIBRARY_ID = 2
 BROWARD_BRANCH_ID  = 8   # "Broward County Library (All Branches)"

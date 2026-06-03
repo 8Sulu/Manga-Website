@@ -198,10 +198,9 @@ def _titles_count() -> int:
     except Exception:
         return 9999
 
-def _missing_indices(library_pattern: str) -> list:
+def _missing_manga_ids(library_pattern: str) -> list:
     try:
-        manga_ids = [r['MangaID'] for r in
-                     execute_query("SELECT MangaID FROM manga ORDER BY MangaID")]
+        manga_ids = [r['MangaID'] for r in execute_query("SELECT MangaID FROM manga ORDER BY MangaID")]
         scraped = {r['MangaID'] for r in execute_query("""
             SELECT DISTINCT a.MangaID
             FROM availability a
@@ -210,7 +209,7 @@ def _missing_indices(library_pattern: str) -> list:
             JOIN library l ON b.LibraryID = l.LibraryID
             WHERE l.LibraryName LIKE %s
         """, (library_pattern,))}
-        return [i + 1 for i, mid in enumerate(manga_ids) if mid not in scraped]
+        return [mid for mid in manga_ids if mid not in scraped]
     except Exception:
         return []
 
@@ -328,18 +327,22 @@ def _broward_search_url(title: str, author: str, manga_type: str = '',
             f"?qu=TITLE%3D{et}&qu=AUTHOR%3D{ea}"
             f"&qf=FORMAT%09Special+Format%09BOOK%09Books")
     if _is_novel(manga_type):
-        base += "&qf=-SUBJECT%09Subject%09Graphic+novels.%09Graphic+novels."
+        base += "&qu=-SUBJECT%3DComic"
     if volume is not None and volume > 0:
         base += f"&qu={volume}"
     base += "&st=PA"   # publication date ascending → vol 1 first
     return base
 
-def _lcpl_search_url(title: str, author: str, volume: int | None = None) -> str:
-    """Build LCPL catalog search URL with optional volume number."""
+def _lcpl_search_url(title: str, author: str, manga_type: str = '', volume: int | None = None) -> str:
     et = _quote_plus(title)
     ea = _quote_plus(author or '')
-    url = (f"https://lcpl.ent.sirsi.net/client/en_US/lcpl/search/results"
-           f"?qu=&qu=TITLE%3D{et}+&qu=AUTHOR%3D{ea}+&te=ILS&h=1")
+    
+    _type_lower = (manga_type or '').lower().replace(' ', '-')
+    if _type_lower in ('light novel', 'light-novel', 'novel'):
+        url = f"https://lcpl.ent.sirsi.net/client/en_US/lcpl/search/results?qu=&qu=TITLE%3D{et}&qu=AUTHOR%3D{ea}&qu=-SUBJECT%3DComic&te=ILS&lm=BOOKS"
+    else:
+        url = f"https://lcpl.ent.sirsi.net/client/en_US/lcpl/search/results?qu=&qu=TITLE%3D{et}&qu=AUTHOR%3D{ea}&te=ILS&lm=BOOKS"
+        
     if volume is not None and volume > 0:
         url += f"&qu={volume}"
     return url
@@ -503,34 +506,40 @@ def _start_scrape_job(action: str):
     is_broward  = action == 'scrape_broward'
     script      = 'broward_scrapper.py' if is_broward else 'scrapper.py'
     lib_pattern = '%Broward%' if is_broward else '%Leon%'
+    
     range_str   = request.form.get('range', '').strip()
+    manga_id    = request.form.get('manga_id', '').strip()
     only_new    = request.form.get('only_new') == '1'
 
-    if only_new:
-        missing = _missing_indices(lib_pattern)
-        if not missing:
-            return jsonify({
-                'ok': False,
-                'message': f'All titles already have '
-                           f'{"Broward" if is_broward else "LCPL"} data',
-            }), 400
+    cmd = [sys.executable, str(SCRIPTS_DIR / script)]
+
+    # Exact Title Rescrape -> Use ID
+    if manga_id:
+        cmd.extend(['--manga-ids', manga_id])
+        
+    # 'New Only' Checked -> Get missing IDs, optionally constrained by range
+    elif only_new:
+        missing_ids = _missing_manga_ids(lib_pattern)
+        if not missing_ids:
+            return jsonify({'ok': False, 'message': f'All titles already have {"Broward" if is_broward else "LCPL"} data'}), 400
+            
         if range_str:
             lo, hi = parse_range_str(range_str, _titles_count())
-            missing = [idx for idx in missing if lo <= idx <= hi]
-            if not missing:
-                return jsonify({
-                    'ok': False,
-                    'message': f'No new titles in range {range_str}',
-                }), 400
-        cmd = [sys.executable, str(SCRIPTS_DIR / script),
-               '--indices', ','.join(map(str, missing))]
-    else:
-        cmd = [sys.executable, str(SCRIPTS_DIR / script)]
-        if range_str:
-            lo, hi = parse_range_str(range_str, _titles_count())
-            cmd.extend(['--range', f'{lo}-{hi}'])
+            all_ids = [r['MangaID'] for r in execute_query("SELECT MangaID FROM manga ORDER BY MangaID")]
+            valid_ids = set(all_ids[lo-1:hi])
+            missing_ids = [m for m in missing_ids if m in valid_ids]
+            if not missing_ids:
+                return jsonify({'ok': False, 'message': f'No new titles in range {range_str}'}), 400
+                
+        cmd.extend(['--manga-ids', ','.join(map(str, missing_ids))])
+        
+    # Standard Batch Scrape -> Use chunked Range
+    elif range_str:
+        lo, hi = parse_range_str(range_str, _titles_count())
+        cmd.extend(['--range', f'{lo}-{hi}'])
 
     ok, status, msg = _start_job(action, cmd)
+    print(f"\n{cmd}\n")
     return jsonify({'ok': ok, 'message': msg}), status
 
 # ── Admin reset ────────────────────────────────────────────────────────────────
@@ -608,18 +617,17 @@ def api_suggestions():
     if _rate_limited(f'suggest:{ip}', limit=120, window=60):
         return jsonify([]), 429
     try:
+        # Fetch MangaID directly
         rows = execute_query(
-            'SELECT Title, Type, Score FROM manga WHERE Title LIKE %s '
+            'SELECT MangaID, Title, Type, Score FROM manga WHERE Title LIKE %s '
             'ORDER BY Score DESC LIMIT 8',
-            (f'%{q}%',),
+            (f'%{q}%',)
         )
-        all_manga  = execute_query("SELECT MangaID, Title FROM manga ORDER BY MangaID")
-        index_map  = {r['Title']: i + 1 for i, r in enumerate(all_manga)}
         return jsonify([{
+            'manga_id': r['MangaID'],
             'title': r['Title'],
             'type':  r['Type'],
             'score': str(r['Score'] or ''),
-            'index': index_map.get(r['Title']),
         } for r in rows])
     except Exception:
         return jsonify([])
@@ -660,44 +668,26 @@ def api_job_history():
 def api_missing_titles():
     total = _titles_count()
     return jsonify({
-        'count':         len(_missing_indices('%Leon%')),
-        'broward_count': len(_missing_indices('%Broward%')),
+        'count':         len(_missing_manga_ids('%Leon%')),
+        'broward_count': len(_missing_manga_ids('%Broward%')),
         'total_titles':  total,
     })
-
-@app.route('/api/title_index')
-@admin_required
-def api_title_index():
-    title = request.args.get('title', '').strip()
-    if not title:
-        return jsonify({'ok': False, 'message': 'No title provided'}), 400
-    try:
-        rows = execute_query("SELECT MangaID, Title FROM manga ORDER BY MangaID")
-        for i, r in enumerate(rows):
-            if r['Title'] == title:
-                return jsonify({'ok': True, 'index': i + 1, 'manga_id': r['MangaID']})
-        return jsonify({'ok': False, 'index': None, 'message': 'Title not found'}), 404
-    except Exception as e:
-        return jsonify({'ok': False, 'message': str(e)}), 500
 
 @app.route('/api/delete_title_results', methods=['POST'])
 @admin_required
 def api_delete_title_results():
-    # CSRF check via header (JS sends it)
     token = request.headers.get('X-CSRF-Token', '')
     if not secrets.compare_digest(token, _csrf_token()):
         return jsonify({'ok': False, 'message': 'Invalid CSRF token'}), 403
 
-    data   = request.get_json()
-    title  = (data or {}).get('title', '').strip()
-    lib_id = (data or {}).get('library')
-    if not title:
-        return jsonify({'ok': False, 'message': 'No title provided'}), 400
+    data     = request.get_json() or {}
+    manga_id = data.get('manga_id')
+    lib_id   = data.get('library')
+    
+    if not manga_id:
+        return jsonify({'ok': False, 'message': 'No manga_id provided'}), 400
+        
     try:
-        rows = execute_query('SELECT MangaID FROM manga WHERE Title = %s', (title,))
-        if not rows:
-            return jsonify({'ok': False, 'message': 'Title not found'}), 404
-        manga_id = rows[0]['MangaID']
         if lib_id:
             execute_update("""
                 DELETE bas FROM branch_availability_status bas
@@ -713,7 +703,8 @@ def api_delete_title_results():
             """, (manga_id,))
         else:
             execute_update('DELETE FROM availability WHERE MangaID = %s', (manga_id,))
-        return jsonify({'ok': True, 'message': f'Cleared availability for "{title}"'})
+            
+        return jsonify({'ok': True, 'message': f'Cleared availability for ID: {manga_id}'})
     except Exception as e:
         return jsonify({'ok': False, 'message': str(e)}), 500
 
@@ -996,7 +987,7 @@ def search():
             'avail_count':  avail_count,
             'out_count':    out_count,
             'hold_count':   hold_count,
-            'lcpl_url':     _lcpl_search_url(title_str, author),
+            'lcpl_url':     _lcpl_search_url(title_str, author, manga_type),
             'broward_url':  _broward_search_url(title_str, author, manga_type),
             'is_novel':     _is_novel(manga_type),
         })

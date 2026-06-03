@@ -98,13 +98,10 @@ def fetch_catalog_keys(session: requests.Session, title: str, author: str,
         "lm": "BOOKS",
     }
 
-    # Exclude comic/graphic-novel subject headings for prose types so manga
-    # results don't contaminate light novel / novel searches.
     _type_lower = (manga_type or '').lower().replace(' ', '-')
     if _type_lower in ('light-novel', 'novel'):
-        params["qf"] = [
-            "-SUBJECT\tSubject\tGraphic novels.\tGraphic novels.",
-            "-SUBJECT\tSubject\tComic books, strips, etc.\tComic books, strips, etc.",
+        params["qu"] = [
+            "", f"TITLE={title}", f"AUTHOR={author}", "-SUBJECT=Comic"
         ]
 
     if page > 0:
@@ -230,25 +227,21 @@ def parse_title_info(data: dict, manga_id: int, availability_id: int) -> tuple:
 
 # ── Orchestration ─────────────────────────────────────────────────────────────
 
-def scrape(start: int = 1, end: int = 1,
-           indices: list[int] | None = None,
+def scrape(start: int = 1, end: int = 999999,
+           manga_ids: list[int] | None = None,
            debug: bool = False) -> list:
     debug_dir = DATA_DIR.parent / "debug" if debug else None
 
     all_pairs = _load_title_author_map()
     pairs_to_scrape = []
 
-    if indices is not None:
-        for i in indices:
-            if 1 <= i <= len(all_pairs):
-                pairs_to_scrape.append(all_pairs[i - 1])
-            else:
-                log.warning(f"  Index {i} out of range — skipping")
+    if manga_ids:
+        target_ids = set(manga_ids)
+        pairs_to_scrape = [p for p in all_pairs if p[3] in target_ids]
     else:
         start = max(1, start)
         end   = min(end, len(all_pairs))
-        for i in range(start - 1, end):
-            pairs_to_scrape.append(all_pairs[i])
+        pairs_to_scrape = all_pairs[start - 1:end]
 
     log.info(f"Scraping {len(pairs_to_scrape)} titles via ILSWS REST API")
 
@@ -371,59 +364,28 @@ def write_to_db(books: list) -> str:
     return msg
 
 # ── Entry point ───────────────────────────────────────────────────────────────
-
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(
-        description="LCPL manga scraper",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__,
-    )
-    parser.add_argument("positional", nargs="*",
-                        help="Legacy: <end>  OR  <start> <end>")
-    parser.add_argument("--debug",   action="store_true",
-                        help="Write raw ILSWS JSON to debug/ folder")
+    parser = argparse.ArgumentParser(description="LCPL manga scraper")
+    parser.add_argument("--debug", action="store_true", help="Write raw ILSWS JSON to debug/ folder")
 
     group = parser.add_mutually_exclusive_group()
-    group.add_argument("--line",    type=int,
-                       help="Scrape a single 1-based line number (e.g. --line 3)")
-    group.add_argument("--range",   type=str,
-                       help="Scrape a range of lines (e.g. --range 1-50)")
-    group.add_argument("--indices", type=lambda s: [int(x) for x in s.split(",")],
-                       metavar="N,N,…",
-                       help="Scrape specific comma-separated 1-based indices (e.g. --indices 1,4,7)")
+    group.add_argument("--range", type=str, help="Scrape a range of lines (e.g. 1-50)")
+    group.add_argument("--manga-ids", type=lambda s: [int(x) for x in s.split(",")], metavar="ID,ID", help="Comma-separated MangaIDs")
 
     args = parser.parse_args()
 
-    if args.indices:
-        books = scrape(indices=args.indices, debug=args.debug)
-    elif args.line:
-        books = scrape(indices=[args.line], debug=args.debug)
+    if args.manga_ids:
+        books = scrape(manga_ids=args.manga_ids, debug=args.debug)
     elif args.range:
         try:
             parts = args.range.split("-")
-            start = max(1, int(parts[0]))
-            end   = int(parts[1])
+            books = scrape(start=max(1, int(parts[0])), end=int(parts[1]), debug=args.debug)
         except (ValueError, IndexError):
             print("Invalid --range format. Use START-END (e.g. --range 1-50)")
             sys.exit(1)
-        books = scrape(start=start, end=end, debug=args.debug)
-    elif args.positional:
-        pos = args.positional
-        try:
-            if len(pos) == 1:
-                books = scrape(start=1, end=int(pos[0]), debug=args.debug)
-            elif len(pos) == 2:
-                books = scrape(start=int(pos[0]), end=int(pos[1]), debug=args.debug)
-            else:
-                print(__doc__)
-                sys.exit(1)
-        except ValueError:
-            print(__doc__)
-            sys.exit(1)
     else:
-        print(__doc__)
-        sys.exit(1)
+        books = scrape(debug=args.debug)
 
     print(write_to_db(books))

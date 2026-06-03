@@ -29,7 +29,7 @@ import requests
 from bs4 import BeautifulSoup
 
 sys.path.append(str(Path(__file__).parent.parent))
-from config.settings import DATA_DIR, DB_CONFIG
+from config.settings import DATA_DIR, DB_CONFIG, BROWARD_BRANCH_MAPPING
 
 log = logging.getLogger(__name__)
 
@@ -195,19 +195,15 @@ def get_search_results(session: requests.Session, title: str, author: str,
 
     while True:
         params: list[tuple[str, str]] = [
-            ("qu",  ""),
             ("qu",  f"TITLE={title}"),
             ("qu",  f"AUTHOR={author}"),
             ("qf",  "FORMAT\tSpecial Format\tBOOK\tBooks"),
             ("h",   "1"),
         ]
 
-        # Exclude comic/graphic-novel subject headings for prose types so manga
-        # results don't contaminate light novel / novel searches.
         _type_lower = (manga_type or '').lower().replace(' ', '-')
         if _type_lower in ('light-novel', 'novel'):
-            params.append(("qf", "-SUBJECT\tSubject\tGraphic novels.\tGraphic novels."))
-            params.append(("qf", "-SUBJECT\tSubject\tComic books, strips, etc.\tComic books, strips, etc."))
+            params.append(("qu", "-SUBJECT=Comic"))
 
         if offset > 0:
             params.append(("rw", str(offset)))
@@ -218,22 +214,37 @@ def get_search_results(session: requests.Session, title: str, author: str,
             print(f"[DEBUG] search page {page}: {url} params={params}")
 
         try:
-            r = session.get(url, params=params, headers=HEADERS, timeout=15)
+            r = session.get(url, params=params, headers=HEADERS, timeout=15, allow_redirects=True)
             if r.status_code != 200:
                 break
 
-            # Attempt to extract the sdcsrf token from the search page HTML
-            if not sdcsrf:
-                m = re.search(r'var __sdcsrf = "([^"]+)"', r.text)
-                if not m:
-                    m = re.search(r'name="sdcsrf"\s*value="([^"]+)"', r.text)
-                if m:
-                    sdcsrf = m.group(1)
-
-            soup = BeautifulSoup(r.text, "html.parser")
-            cells = soup.select("div.results_cell")
-            if not cells:
+            if "/one" in r.url:
+                log.info("Redirected to detail page. Parsing directly.")
+                soup = BeautifulSoup(r.text, "html.parser")
+                
+                token_input = soup.find("input", {"name": "sdcsrf"})
+                if token_input:
+                    sdcsrf = token_input.get("value", "")
+                else:
+                    m = re.search(r'var __sdcsrf = "([^"]+)"', r.text)
+                    if m: sdcsrf = m.group(1)
+                    
+                single_item = parse_detail_page(soup) 
+                if single_item:
+                    all_items.append(single_item)
                 break
+
+                if not sdcsrf:
+                    m = re.search(r'var __sdcsrf = "([^"]+)"', r.text)
+                    if not m:
+                        m = re.search(r'name="sdcsrf"\s*value="([^"]+)"', r.text)
+                    if m:
+                        sdcsrf = m.group(1)
+
+                soup = BeautifulSoup(r.text, "html.parser")
+                cells = soup.select("div.results_cell")
+                if not cells:
+                    break
 
             new_found = False
             for cell in cells:
@@ -286,6 +297,44 @@ def get_search_results(session: requests.Session, title: str, author: str,
 
     log.info(f"  Found {len(all_items)} catalog item(s)")
     return all_items, sdcsrf
+
+def parse_detail_page(soup: BeautifulSoup) -> dict | None:
+    """
+    Parses a single SirsiDynix detail page to extract 
+    the Manga ID and availability information.
+    """
+    try:
+        id_element = soup.find(string=re.compile(r'SD_ILS:\d+'))
+        if not id_element:
+            return None
+        
+        m_id = re.search(r'SD_ILS:(\d+)', id_element).group(1)
+        
+        title_h1 = soup.find('h1') or soup.find('h2')
+        title_text = title_h1.get_text(strip=True) if title_h1 else ""
+        
+        availability = []
+        table = soup.find('table', {'class': 'availability'})
+        if table:
+            rows = table.find_all('tr')[1:] # Skip header
+            for row in rows:
+                cols = row.find_all('td')
+                if len(cols) >= 4:
+                    availability.append({
+                        "library": cols[0].get_text(strip=True),
+                        "call_number": cols[1].get_text(strip=True),
+                        "status": cols[3].get_text(strip=True)
+                    })
+
+        return {
+            "item_id": m_id,
+            "volume": extract_volume(title_text),
+            "availability": availability,
+            "index" : "0"
+        }
+    except Exception as e:
+        log.error(f"Error parsing detail page: {e}")
+        return None
 
 
 # ── Per-item JSON fetch (availability mapping) ──────────────────────────────
@@ -372,10 +421,13 @@ def build_volume_branch_map(
 
     for volume, copies in item_copies:
         for copy in copies:
-            branch_name = copy["library"]
-            branch_id   = branch_map.get(branch_name)
+            raw_name = copy["library"]
+            db_name = BROWARD_BRANCH_MAPPING.get(raw_name, raw_name)
+            
+            branch_id = branch_map.get(db_name)
+            
             if branch_id is None:
-                unmatched.add(branch_name)
+                unmatched.add(raw_name)
                 continue
 
             if copy["on_shelf"]:
@@ -421,28 +473,28 @@ def process_batch(args: argparse.Namespace) -> None:
     cur.execute("SELECT LibraryID FROM library WHERE LibraryName LIKE %s LIMIT 1", ("%Broward%",))
     lib_row = cur.fetchone()
     cur.close(); conn.close()
+    
     if not lib_row:
         print("[-] Broward library not found in DB.")
         return
     broward_library_id = lib_row["LibraryID"]
 
-    if args.indices:
-        indices = args.indices
-    elif args.line:
-        indices = [args.line]
+    # --- Match exact IDs or ranges ---
+    if args.manga_ids:
+        target_ids = set(args.manga_ids)
+        pairs = [p for p in all_pairs if p[3] in target_ids]
     elif args.range:
         try:
             s, e = args.range.split("-")
-            indices = list(range(max(1, int(s)), int(e) + 1))
+            pairs = all_pairs[max(0, int(s) - 1):int(e)]
         except (ValueError, IndexError):
             print("[-] Invalid --range. Use START-END (e.g. --range 1-50)")
             return
     else:
-        indices = list(range(1, len(all_pairs) + 1))
+        pairs = all_pairs
 
-    pairs = [all_pairs[i - 1] for i in indices if 1 <= i <= len(all_pairs)]
     if not pairs:
-        print("[-] No valid titles.")
+        print("[-] No valid titles matched the criteria.")
         return
 
     print(f"[*] Broward library ID  : {broward_library_id}")
@@ -546,23 +598,13 @@ def process_batch(args: argparse.Namespace) -> None:
         csv_file.close()
     print("\n[*] Done.")
 
-
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Broward County Library manga scraper — volume-aware",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__,
-    )
-    parser.add_argument("--debug",  action="store_true",
-                        help="Print visited URLs and per-copy details")
-    parser.add_argument("--output", type=str,
-                        help="Also save results to CSV")
+    parser = argparse.ArgumentParser(description="Broward County Library manga scraper")
+    parser.add_argument("--debug",  action="store_true", help="Print visited URLs and per-copy details")
+    parser.add_argument("--output", type=str, help="Also save results to CSV")
+    
     group = parser.add_mutually_exclusive_group()
-    group.add_argument("--line",    type=int,
-                       help="Single 1-based index (e.g. --line 3)")
-    group.add_argument("--range",   type=str,
-                       help="Range (e.g. --range 1-50)")
-    group.add_argument("--indices", type=lambda s: [int(x) for x in s.split(",")],
-                       metavar="N,N,…",
-                       help="Comma-separated 1-based indices")
+    group.add_argument("--range", type=str, help="Range (e.g. 1-50)")
+    group.add_argument("--manga-ids", type=lambda s: [int(x) for x in s.split(",")], help="Comma-separated MangaIDs")
+    
     process_batch(parser.parse_args())
