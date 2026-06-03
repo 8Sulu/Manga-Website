@@ -102,13 +102,13 @@ def _get_db():
     return mysql.connector.connect(**DB_CONFIG)
 
 
-def _load_title_author_map() -> list[tuple[int, str, str, int]]:
+def _load_title_author_map() -> list[tuple[int, str, str, int, str]]:
     conn = _get_db()
     cur  = conn.cursor(dictionary=True)
-    cur.execute("SELECT MangaID, Title, Author FROM manga ORDER BY MangaID")
+    cur.execute("SELECT MangaID, Title, Author, Type FROM manga ORDER BY MangaID")
     rows = cur.fetchall()
     cur.close(); conn.close()
-    return [(i + 1, r["Title"], r["Author"] or "", r["MangaID"]) for i, r in enumerate(rows)]
+    return [(i + 1, r["Title"], r["Author"] or "", r["MangaID"], r["Type"] or "") for i, r in enumerate(rows)]
 
 
 def _load_broward_branch_map() -> dict[str, int]:
@@ -180,7 +180,7 @@ def _upsert_broward_results(cursor, manga_id: int, broward_library_id: int,
 # ── Search results: collect item IDs, titles, and CSRF ────────────────────────
 
 def get_search_results(session: requests.Session, title: str, author: str,
-                       debug: bool) -> tuple[list[dict], str]:
+                       manga_type: str, debug: bool) -> tuple[list[dict], str]:
     """
     Return parsed items and the global sdcsrf token for the session.
     Items are dictionaries with: item_id, volume, index
@@ -201,6 +201,12 @@ def get_search_results(session: requests.Session, title: str, author: str,
             ("qf",  "FORMAT\tSpecial Format\tBOOK\tBooks"),
             ("h",   "1"),
         ]
+        
+        # Exclude graphic-novel subject for prose types so manga/LN don't cross-contaminate
+        _type_lower = manga_type.lower().replace(' ', '-')
+        if _type_lower in ('light-novel', 'novel'):
+            params.append(("qf", "-SUBJECT\tSubject\tGraphic novels.\tGraphic novels."))
+
         if offset > 0:
             params.append(("rw", str(offset)))
             params.append(("isd", "true"))
@@ -467,14 +473,14 @@ def process_batch(args: argparse.Namespace) -> None:
         "Referer":          f"{BASE_URL}{CLIENT}",
     })
 
-    for progress, (idx, title, author, manga_id) in enumerate(pairs, start=1):
+    for progress, (idx, title, author, manga_id, manga_type) in enumerate(pairs, start=1):
         if not author:
             log.warning(f"Index {idx} '{title}' — no author, skipping")
             continue
 
         print(f"[{progress}/{len(pairs)}] {title}", flush=True)
 
-        items, sdcsrf = get_search_results(session, title, author, args.debug)
+        items, sdcsrf = get_search_results(session, title, author, manga_type, args.debug)
         if not items:
             print("  [-] No catalog entries found")
             continue

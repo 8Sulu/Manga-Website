@@ -472,5 +472,65 @@
     "status": "error",
     "message": "ValueError: too many values to unpack (expected 2, got 6)",
     "at": "2026-06-02T08:39:41.223075+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T00:10:27.376488+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T00:21:55.249838+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T00:22:13.770131+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T00:22:24.525679+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T00:48:33.087219+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T00:48:38.194016+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "no books to write",
+    "at": "2026-06-03T00:49:04.319236+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "no books to write",
+    "at": "2026-06-03T00:49:09.886131+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T00:49:17.425041+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T00:49:25.018114+00:00"
   }
 ]

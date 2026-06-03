@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Admin — Manga Tracker</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
   <style>
     .admin-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     @media (max-width: 680px) {
@@ -140,6 +141,7 @@
       <div class="step-body">
         <form id="form-get_manga" class="tool-row" onsubmit="return startJob(event,'get_manga')">
           <input type="hidden" name="action" value="get_manga">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <input type="number" name="offset" placeholder="Offset (0, 500, 1000…)" min="0" required style="max-width:200px">
           <button type="submit" class="primary" id="btn-get_manga">Run</button>
           <button type="button" id="stop-get_manga" class="stop-btn" onclick="stopJob('get_manga')" style="display:none">■ Stop</button>
@@ -171,6 +173,7 @@
       <div class="step-body">
         <form id="form-scrape" class="tool-row" onsubmit="return startJob(event,'scrape')">
           <input type="hidden" name="action" value="scrape">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <input type="text" name="range" placeholder="Range (e.g. 1–20)" style="max-width:140px">
           <label class="inline" title="Only scrape titles with no existing LCPL data">
             <input type="checkbox" name="only_new" value="1"> New only
@@ -202,6 +205,7 @@
       <div class="step-body">
         <form id="form-scrape_broward" class="tool-row" onsubmit="return startJob(event,'scrape_broward')">
           <input type="hidden" name="action" value="scrape_broward">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <input type="text" name="range" placeholder="Range (e.g. 1–20)" style="max-width:140px">
           <label class="inline" title="Only scrape titles with no existing Broward data">
             <input type="checkbox" name="only_new" value="1"> New only
@@ -222,7 +226,7 @@
       </div>
     </div>
 
-    <!-- Step 4: Manual Overrides (trimmed) -->
+    <!-- Step 4: Manual Overrides -->
     <div class="pipeline-step">
       <div class="step-header">
         <div class="step-num">4</div>
@@ -365,6 +369,11 @@
 <div class="toast-shelf" id="toasts"></div>
 
 <script>
+// ── CSRF helper ────────────────────────────────────────────────
+function getCsrf() {
+  return document.querySelector('meta[name="csrf-token"]')?.content || '';
+}
+
 // ── Utility ────────────────────────────────────────────────────
 function toast(msg, type = '') {
   const el = Object.assign(document.createElement('div'), { className: 'toast ' + type, textContent: msg });
@@ -437,8 +446,8 @@ async function updateStaleIndicators() {
   try {
     const history = await fetch('/api/job_history').then(r => r.json());
 
-    const lastScrape   = history.find(h => h.job === 'scrape'         && h.status === 'done');
-    const lastBroward  = history.find(h => h.job === 'scrape_broward' && h.status === 'done');
+    const lastScrape  = history.find(h => h.job === 'scrape'         && h.status === 'done');
+    const lastBroward = history.find(h => h.job === 'scrape_broward' && h.status === 'done');
 
     function applyStale(job, elId, hintId) {
       const staleEl = document.getElementById(elId);
@@ -480,7 +489,9 @@ async function doReset() {
   btn.disabled = true;
   resultEl.textContent = 'Resetting…'; resultEl.style.color = 'var(--text3)';
   try {
-    const d = await fetch('/admin/reset', { method: 'POST' }).then(r => r.json());
+    const form = new FormData();
+    form.append('csrf_token', getCsrf());
+    const d = await fetch('/admin/reset', { method: 'POST', body: form }).then(r => r.json());
     resultEl.style.color = d.ok ? 'var(--green)' : 'var(--red)';
     resultEl.textContent = (d.messages || ['Reset failed']).join(' · ');
     if (d.ok) {
@@ -512,7 +523,11 @@ async function deleteTitleResultsConfirmed() {
 
   try {
     const d = await fetch('/api/delete_title_results', {
-      method: 'POST', headers: {'Content-Type':'application/json'},
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': getCsrf(),
+      },
       body: JSON.stringify({title, library: library || null})
     }).then(r => r.json());
 
@@ -536,7 +551,6 @@ async function undoClear() {
   if (!_lastClearedTitle) return;
   const title = _lastClearedTitle;
   document.getElementById('del-results-undo').classList.remove('visible');
-  // Re-scrape both libraries so the undo is complete regardless of which was cleared
   await rescrapeByTitle(title, 'scrape');
   await rescrapeByTitle(title, 'scrape_broward');
 }
@@ -554,13 +568,13 @@ async function batchSearch(q) {
     try {
       const items = await fetch(`/api/suggestions?q=${encodeURIComponent(q)}`).then(r => r.json());
       el.innerHTML = items.length
-        ? items.map((item, i) => `
+        ? items.map(item => `
             <div class="batch-title-row">
               <span class="batch-title-name">${item.title}</span>
               <span class="batch-title-meta">${item.type || ''} ${item.score ? '· ★ ' + parseFloat(item.score).toFixed(2) : ''}</span>
-              <button onclick="clearBatchTitle('${item.title.replace(/'/g, "\\'")}')" class="danger" style="font-size:.6rem;padding:2px 7px;margin-left:6px">Clear</button>
-              <button onclick="rescrapeByTitle('${item.title.replace(/'/g, "\\'")}','scrape')" class="btn-rescrape">↺ LCPL</button>
-              <button onclick="rescrapeByTitle('${item.title.replace(/'/g, "\\'")}','scrape_broward')" class="btn-rescrape btn-rescrape-broward">↺ BCL</button>
+              <button onclick="clearBatchTitle('${item.title.replace(/'/g, "\\'").replace(/"/g, '&quot;')}')" class="danger" style="font-size:.6rem;padding:2px 7px;margin-left:6px">Clear</button>
+              <button onclick="rescrapeByTitle('${item.title.replace(/'/g, "\\'").replace(/"/g, '&quot;')}','scrape')" class="btn-rescrape">↺ LCPL</button>
+              <button onclick="rescrapeByTitle('${item.title.replace(/'/g, "\\'").replace(/"/g, '&quot;')}','scrape_broward')" class="btn-rescrape btn-rescrape-broward">↺ BCL</button>
             </div>`).join('')
         : '<div style="font-family:var(--mono);font-size:.7rem;color:var(--text3);padding:.6rem .75rem">No results</div>';
     } catch {}
@@ -571,7 +585,11 @@ async function clearBatchTitle(title) {
   if (!confirm(`Clear all availability data for "${title}"?`)) return;
   try {
     const d = await fetch('/api/delete_title_results', {
-      method: 'POST', headers: {'Content-Type':'application/json'},
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': getCsrf(),
+      },
       body: JSON.stringify({title})
     }).then(r => r.json());
     toast(d.message, d.ok ? 'ok' : 'err');
@@ -580,18 +598,17 @@ async function clearBatchTitle(title) {
 }
 
 async function rescrapeByTitle(title, action = 'scrape') {
-  // Find the 1-based index by fetching the title list
   try {
     const d = await fetch(`/api/title_index?title=${encodeURIComponent(title)}`).then(r => r.json());
     if (!d.index) { toast(`No index found for "${title}"`, 'err'); return; }
 
     if (pollers[action]) { toast(`A ${action.replace(/_/g, ' ')} is already running`, 'err'); return; }
 
-    // Fire scrape with --indices N (via the existing scrape job mechanism)
     const form = new FormData();
-    form.append('action',   action);
-    form.append('range',    d.index + '-' + d.index); // single-title range
-    form.append('only_new', '0');
+    form.append('action',      action);
+    form.append('range',       d.index + '-' + d.index);
+    form.append('only_new',    '0');
+    form.append('csrf_token',  getCsrf());
 
     const btn     = document.getElementById('btn-' + action);
     const stopBtn = document.getElementById('stop-' + action);
