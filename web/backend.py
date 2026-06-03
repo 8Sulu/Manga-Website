@@ -347,11 +347,13 @@ def _lcpl_search_url(title: str, author: str, volume: int | None = None) -> str:
 # ── DB schema & seed ───────────────────────────────────────────────────────────
 
 SCHEMA = """
+SET FOREIGN_KEY_CHECKS=0;
 DROP TABLE IF EXISTS branch_availability_status;
 DROP TABLE IF EXISTS availability;
 DROP TABLE IF EXISTS branch;
 DROP TABLE IF EXISTS manga;
 DROP TABLE IF EXISTS library;
+SET FOREIGN_KEY_CHECKS=1;
 CREATE TABLE manga (
     MangaID INT PRIMARY KEY, Title VARCHAR(255) NOT NULL, `Type` VARCHAR(50),
     Volumes INT, Members INT, Score DECIMAL(4,2), Author VARCHAR(255),
@@ -376,7 +378,7 @@ CREATE TABLE branch_availability_status (
     AvailabilityID INT NOT NULL, BranchID INT NOT NULL, `Status` VARCHAR(100) NOT NULL,
     FOREIGN KEY (AvailabilityID) REFERENCES availability(AvailabilityID) ON DELETE CASCADE,
     FOREIGN KEY (BranchID) REFERENCES branch(BranchID) ON DELETE CASCADE
-)
+);
 """
 
 INSERT_OPS = [
@@ -548,7 +550,7 @@ def admin_reset():
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            for stmt in SCHEMA.strip().split(';'):
+            for stmt in SCHEMA.strip().split(';\n'):
                 stmt = stmt.strip()
                 if stmt:
                     cursor.execute(stmt)
@@ -908,17 +910,28 @@ def search():
     # ── Build final grouped list ───────────────────────────────────────────────
     grouped = []
     for td in titles_map.values():
-        avail_count = out_count = hold_count = 0
+        # Calculate distinct volume-level rollup counts
+        volume_best_status = {}
         has_vol1 = False
-        lib_list = []
+        for linfo in td['lib_data'].values():
+            for vol_num, b_dict in linfo['volumes'].items():
+                if vol_num == 1:
+                    has_vol1 = True
+                for bid, status in b_dict.items():
+                    cur = volume_best_status.get(vol_num)
+                    if cur is None or STATUS_PRIORITY[status] > STATUS_PRIORITY.get(cur, -1):
+                        volume_best_status[vol_num] = status
 
+        avail_count = sum(1 for s in volume_best_status.values() if s == 'Available')
+        hold_count  = sum(1 for s in volume_best_status.values() if s == 'On Hold')
+        out_count   = sum(1 for s in volume_best_status.values() if s not in ('Available', 'On Hold'))
+
+        lib_list = []
         for linfo in sorted(td['lib_data'].values(), key=lambda x: x['library_id']):
             branch_best: dict[int, str] = {}
             vol_list = []
 
             for vol_num in sorted(linfo['volumes'].keys()):
-                if vol_num == 1:
-                    has_vol1 = True
                 branch_statuses = linfo['volumes'][vol_num]
                 vol_branches = []
                 for bid in sorted(branch_statuses.keys(),
@@ -930,9 +943,6 @@ def search():
                         'short':  _branch_short(bname, linfo['library_id'], BROWARD_LIBRARY_ID),
                         'status': status,
                     })
-                    if status == 'Available':  avail_count += 1
-                    elif status == 'On Hold':  hold_count  += 1
-                    else:                      out_count   += 1
 
                     cur_best = branch_best.get(bid)
                     if (cur_best is None or
@@ -986,11 +996,20 @@ def search():
             'avail_count':  avail_count,
             'out_count':    out_count,
             'hold_count':   hold_count,
-            # Pre-build catalog URLs (used by template for the main link and per-volume links)
             'lcpl_url':     _lcpl_search_url(title_str, author),
             'broward_url':  _broward_search_url(title_str, author, manga_type),
             'is_novel':     _is_novel(manga_type),
         })
+
+    # Pagination handling
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 48, type=int)
+    
+    total_count = len(grouped)
+    total_pages = max(1, (total_count + per_page - 1) // per_page)
+    page = max(1, min(page, total_pages))
+
+    paginated_results = grouped[(page - 1) * per_page : page * per_page]
 
     filters = {
         'title': title, 'type': type_, 'branch': branch,
@@ -999,8 +1018,10 @@ def search():
     }
     return render_template(
         'results.html',
-        results=grouped,
-        count=len(grouped),
+        results=paginated_results,
+        count=total_count,
+        page=page,
+        total_pages=total_pages,
         filters=filters,
         has_filters=any(v for k, v in filters.items()),
         LCPL_LIBRARY_ID=LCPL_LIBRARY_ID,

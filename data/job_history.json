@@ -532,5 +532,47 @@
     "status": "done",
     "message": "[*] Done.",
     "at": "2026-06-03T00:49:25.018114+00:00"
+  },
+  {
+    "job": "reset",
+    "status": "done",
+    "message": "✓ Schema recreated · ✓ manga.csv · ✓ libraries.csv · ✓ branches.csv",
+    "at": "2026-06-03T02:15:30.239423+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T02:15:44.553738+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T02:15:48.214803+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T02:16:08.330399+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 32 LCPL availability rows",
+    "at": "2026-06-03T02:16:10.552183+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "error",
+    "message": "2026-06-02 22:27:18,175 INFO   Search page 1: 12 catalog keys",
+    "at": "2026-06-03T02:27:18.178276+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 1670 LCPL availability rows",
+    "at": "2026-06-03T02:52:37.006415+00:00"
   }
 ]

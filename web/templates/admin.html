@@ -452,6 +452,11 @@ async function updateStaleIndicators() {
     function applyStale(job, elId, hintId) {
       const staleEl = document.getElementById(elId);
       const hintEl  = document.getElementById(hintId);
+
+      if (hintEl) {
+        hintEl.querySelectorAll('.stale-appended').forEach(el => el.remove());
+      }
+
       if (!job) {
         staleEl.style.display = 'block';
         staleEl.textContent = 'Never scraped';
@@ -460,8 +465,10 @@ async function updateStaleIndicators() {
       const age = daysSince(job.at);
       const label = 'Last scraped ' + fmtDate(job.at);
       if (hintEl) {
-        hintEl.innerHTML = hintEl.innerHTML
-          + ` · <span class="${age > 3 ? 'stale' : ''}">${label}</span>`;
+        const span = document.createElement('span');
+        span.className = 'stale-appended ' + (age > 3 ? 'stale' : '');
+        span.textContent = ' · ' + label;
+        hintEl.appendChild(span);
       }
       if (age > 7) {
         staleEl.style.display = 'block';
