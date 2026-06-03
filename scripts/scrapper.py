@@ -41,17 +41,17 @@ MAX_RETRIES      = 3
 
 # ── Database Source of Truth ──────────────────────────────────────────────────
 
-def _load_title_author_map() -> list[tuple[int, str, str, int]]:
-    """Return list of (1-based-index, title, author, manga_id) from the manga DB table."""
+def _load_title_author_map() -> list[tuple[int, str, str, int, str]]:
+    """Return list of (1-based-index, title, author, manga_id, type) from the manga DB table."""
     from config.settings import DB_CONFIG
     import mysql.connector
     conn = mysql.connector.connect(**DB_CONFIG)
     cursor = conn.cursor(dictionary=True)
-    cursor.execute("SELECT MangaID, Title, Author FROM manga ORDER BY MangaID")
+    cursor.execute("SELECT MangaID, Title, Author, Type FROM manga ORDER BY MangaID")
     rows = cursor.fetchall()
     cursor.close()
     conn.close()
-    return [(i + 1, r['Title'], r['Author'] or '', r['MangaID']) for i, r in enumerate(rows)]
+    return [(i + 1, r['Title'], r['Author'] or '', r['MangaID'], r['Type'] or '') for i, r in enumerate(rows)]
 
 # ── HTTP session ──────────────────────────────────────────────────────────────
 
@@ -90,13 +90,23 @@ def _extract_keys_from_href(href: str, keys: list, seen: set) -> None:
                 keys.append(k)
 
 def fetch_catalog_keys(session: requests.Session, title: str, author: str,
-                       page: int = 0) -> list:
+                       manga_type: str = '', page: int = 0) -> list:
     params: dict = {
         "qu": ["", f"TITLE={title}", f"AUTHOR={author}"],
         "te": "ILS",
         "h":  "1",
         "lm": "BOOKS",
     }
+
+    # Exclude comic/graphic-novel subject headings for prose types so manga
+    # results don't contaminate light novel / novel searches.
+    _type_lower = (manga_type or '').lower().replace(' ', '-')
+    if _type_lower in ('light-novel', 'novel'):
+        params["qf"] = [
+            "-SUBJECT\tSubject\tGraphic novels.\tGraphic novels.",
+            "-SUBJECT\tSubject\tComic books, strips, etc.\tComic books, strips, etc.",
+        ]
+
     if page > 0:
         params["rw"] = page * RESULTS_PER_PAGE
 
@@ -190,9 +200,6 @@ def item_status(current_loc: str, due_date) -> str:
 
 def parse_title_info(data: dict, manga_id: int, availability_id: int) -> tuple:
     books = []
-    # FIX: BRANCH_MAPPING keys are short ILSWS libraryID codes (e.g. "NORTHEAST", "MAIN").
-    # The ILSWS API returns libraryID in the same short-code format.
-    # valid_branch_keys uses uppercase for case-insensitive matching.
     valid_branch_keys = {k.upper() for k in BRANCH_MAPPING}
 
     for title_entry in data.get("TitleInfo", []):
@@ -214,8 +221,6 @@ def parse_title_info(data: dict, manga_id: int, availability_id: int) -> tuple:
             books.append({
                 "manga_id":        manga_id,
                 "volume":          volume,
-                # FIX: store library_id (the short ILSWS code) as the branch key.
-                # write_to_db() will look this up in BRANCH_MAPPING to get the BranchID.
                 "branch_status":   [(library_id, final_status)],
                 "availability_id": availability_id,
             })
@@ -251,7 +256,7 @@ def scrape(start: int = 1, end: int = 1,
     all_books: list = []
     availability_id = 1
 
-    for progress, (idx, title, author, manga_id) in enumerate(pairs_to_scrape, start=1):
+    for progress, (idx, title, author, manga_id, manga_type) in enumerate(pairs_to_scrape, start=1):
         if not author:
             log.warning(f"  Index {idx} '{title}' has no author — skipping")
             continue
@@ -263,7 +268,7 @@ def scrape(start: int = 1, end: int = 1,
         seen_keys:    set  = set()
         page = 0
         while True:
-            keys = fetch_catalog_keys(session, title, author, page)
+            keys = fetch_catalog_keys(session, title, author, manga_type, page)
             log.info(f"  Search page {page}: {len(keys)} catalog keys")
             for k in keys:
                 if k not in seen_keys:
@@ -308,16 +313,6 @@ def write_to_db(books: list) -> str:
     conn = mysql.connector.connect(**DB_CONFIG)
     cursor = conn.cursor()
 
-    # FIX: Use BRANCH_MAPPING directly to resolve short ILSWS codes → BranchIDs.
-    # The old approach re-queried the DB by uppercased full BranchName
-    # (e.g. "BRUCE J. HOST NORTHEAST BRANCH LIBRARY") and then tried to look up
-    # short codes like "NORTHEAST" in that map — always returning None, so
-    # inserted was always 0 and no branch_availability_status rows were ever written.
-    #
-    # BRANCH_MAPPING (from config/settings.py) already maps the exact short codes
-    # the ILSWS API returns as libraryID:
-    #   {"NORTHEAST": 1, "BLPERRY": 2, "EASTSIDE": 3, "FTBRADEN": 4,
-    #    "LAKEJAX": 5, "MAIN": 6, "WOODVILLE": 7}
     branch_id_map = {k.upper(): v for k, v in BRANCH_MAPPING.items()}
 
     # Resolve LCPL LibraryID to scope the delete correctly
@@ -331,7 +326,6 @@ def write_to_db(books: list) -> str:
     manga_ids    = list({b["manga_id"] for b in books})
     placeholders = ','.join(['%s'] * len(manga_ids))
 
-    # Delete existing LCPL availability rows for these titles before re-inserting
     cursor.execute(f"""
         DELETE bas FROM branch_availability_status bas
         JOIN availability a ON bas.AvailabilityID = a.AvailabilityID

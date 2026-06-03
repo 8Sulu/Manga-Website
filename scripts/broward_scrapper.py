@@ -201,11 +201,13 @@ def get_search_results(session: requests.Session, title: str, author: str,
             ("qf",  "FORMAT\tSpecial Format\tBOOK\tBooks"),
             ("h",   "1"),
         ]
-        
-        # Exclude graphic-novel subject for prose types so manga/LN don't cross-contaminate
-        _type_lower = manga_type.lower().replace(' ', '-')
+
+        # Exclude comic/graphic-novel subject headings for prose types so manga
+        # results don't contaminate light novel / novel searches.
+        _type_lower = (manga_type or '').lower().replace(' ', '-')
         if _type_lower in ('light-novel', 'novel'):
             params.append(("qf", "-SUBJECT\tSubject\tGraphic novels.\tGraphic novels."))
+            params.append(("qf", "-SUBJECT\tSubject\tComic books, strips, etc.\tComic books, strips, etc."))
 
         if offset > 0:
             params.append(("rw", str(offset)))
@@ -235,11 +237,10 @@ def get_search_results(session: requests.Session, title: str, author: str,
 
             new_found = False
             for cell in cells:
-                # Look for item ID in <input type="hidden" value="ent://SD_ILS/0/SD_ILS:126525">
                 inp = cell.select_one("input[value*='ent://SD_ILS/0/SD_ILS:']")
                 if not inp:
                     continue
-                
+
                 val = inp.get("value", "")
                 m_id = re.search(r'SD_ILS:(\d+)', val)
                 if not m_id:
@@ -252,7 +253,6 @@ def get_search_results(session: requests.Session, title: str, author: str,
                 seen.add(item_id)
                 new_found = True
 
-                # Extract title and call number to get volume directly, bypassing detailclick
                 title_link = cell.select_one("div.displayDetailLink a")
                 title_text = title_link.get("title", "") if title_link else ""
 
@@ -263,7 +263,6 @@ def get_search_results(session: requests.Session, title: str, author: str,
                 vol_from_call  = extract_volume(call_text)
                 volume = vol_from_title if vol_from_title else vol_from_call
 
-                # Extract Tapestry Index
                 cell_id = cell.get("id", "")
                 m_idx = re.search(r'\d+', cell_id)
                 idx = m_idx.group(0) if m_idx else "0"
@@ -276,11 +275,11 @@ def get_search_results(session: requests.Session, title: str, author: str,
 
             if not new_found or len(cells) < 12:
                 break
-            
+
             offset += 12
             page += 1
             time.sleep(0.8)
-            
+
         except Exception as e:
             log.warning(f"  Search error: {e}")
             break
@@ -296,7 +295,6 @@ def fetch_item_availability(session: requests.Session, item_id: str, idx: str,
     """
     POST lookuptitleinfo -> JSON with per-copy branch/status
     """
-    # Note the proper encoding expected by Tapestry: ent:$002f$002f...
     ent_encoded = f"ent:$002f$002fSD_ILS$002f0$002fSD_ILS:{item_id}"
 
     info_url = (
@@ -320,7 +318,6 @@ def fetch_item_availability(session: requests.Session, item_id: str, idx: str,
     if debug:
         print(f"[DEBUG] lookuptitleinfo: {info_url}")
 
-    # Pass sdcsrf as a per-request header, send explicitly empty body
     lookup_headers = HEADERS.copy()
     lookup_headers["sdcsrf"] = sdcsrf
     lookup_headers["Content-Length"] = "0"
@@ -465,7 +462,7 @@ def process_batch(args: argparse.Namespace) -> None:
     cursor  = db_conn.cursor()
 
     session = requests.Session()
-    session.get(f"{BASE_URL}{CLIENT}", timeout=20) 
+    session.get(f"{BASE_URL}{CLIENT}", timeout=20)
 
     session.headers.update({
         "User-Agent":       HEADERS["User-Agent"],
@@ -489,7 +486,6 @@ def process_batch(args: argparse.Namespace) -> None:
             print("  [-] Warning: No sdcsrf token found on search page.")
             continue
 
-        # Fetch copies for each item using the properly formatted JSON query
         item_copies: list[tuple[int, list[dict]]] = []
         for item in items:
             volume = item["volume"]
