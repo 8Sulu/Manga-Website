@@ -838,5 +838,77 @@
     "status": "done",
     "message": "inserted 2 LCPL availability rows",
     "at": "2026-06-03T05:32:38.544305+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 1588 LCPL availability rows",
+    "at": "2026-06-03T05:45:41.284534+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 2 LCPL availability rows",
+    "at": "2026-06-03T06:01:01.890022+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 2 LCPL availability rows",
+    "at": "2026-06-03T06:01:31.388665+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 27 LCPL availability rows",
+    "at": "2026-06-03T06:01:52.821809+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "no books to write",
+    "at": "2026-06-03T06:08:29.297475+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 4 LCPL availability rows",
+    "at": "2026-06-03T06:09:58.804208+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "error",
+    "message": "2026-06-03 03:32:43,144 INFO   Key 365027: vol(s) [9, 9] @ ['NORTHEAST', 'EASTSIDE']",
+    "at": "2026-06-03T07:32:43.151082+00:00"
+  },
+  {
+    "job": "reset",
+    "status": "done",
+    "message": "✓ Schema recreated · ✓ manga.csv · ✓ libraries.csv · ✓ branches.csv",
+    "at": "2026-06-03T07:32:52.724255+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T07:37:37.949128+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 1585 LCPL availability rows",
+    "at": "2026-06-03T07:44:28.677873+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 4 LCPL availability rows",
+    "at": "2026-06-03T08:43:50.453061+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 2 LCPL availability rows",
+    "at": "2026-06-03T08:44:06.808365+00:00"
   }
 ]

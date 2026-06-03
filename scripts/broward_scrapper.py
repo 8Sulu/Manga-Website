@@ -270,6 +270,14 @@ def get_search_results(session: requests.Session, title: str, author: str,
                 call_div = cell.select_one("div.PREFERRED_CALLNUMBER div.displayElementText")
                 call_text = call_div.get_text(" ", strip=True) if call_div else ""
 
+                is_novel = manga_type.lower() in ('light-novel', 'novel')
+                has_graphic = "GRAPHIC" in call_text.upper()
+                        
+                if is_novel and not has_graphic:
+                    if debug:
+                        print(f"[DEBUG] Skipping novel {title_text} (no GRAPHIC in call number)")
+                    continue
+
                 vol_from_title = extract_volume(title_text)
                 vol_from_call  = extract_volume(call_text)
                 volume = vol_from_title if vol_from_title else vol_from_call
@@ -320,9 +328,12 @@ def parse_detail_page(soup: BeautifulSoup) -> dict | None:
             for row in rows:
                 cols = row.find_all('td')
                 if len(cols) >= 4:
+                    call_number = cols[1].get_text(strip=True)
+                    if ('GRAPHIC' not in call_number.upper()) and (manga_type.lower() in ('light-novel', 'novel')):
+                        continue
                     availability.append({
                         "library": cols[0].get_text(strip=True),
-                        "call_number": cols[1].get_text(strip=True),
+                        "call_number": call_number,
                         "status": cols[3].get_text(strip=True)
                     })
 

@@ -76,7 +76,14 @@ def make_session() -> requests.Session:
 
 # ── Step 1: search page → catalog keys ───────────────────────────────────────
 
-def _extract_keys_from_href(href: str, keys: list, seen: set) -> None:
+def _extract_keys_and_volume(a_tag, keys_map: dict) -> None:
+    href = a_tag.get("href", "")
+    title_text = a_tag.get("title", "")
+    
+    # Extract volume from the title string (e.g., "Vol. 2", "Volume 6")
+    vol_match = re.search(r'\bV(?:OL(?:UME)?)?[.\s]+(\d+)', title_text, re.IGNORECASE)
+    html_vol = int(vol_match.group(1)) if vol_match else None
+
     for pattern in (
         r"SD_ILS[:\u003a](\d+)",
         r"SD_ILS%3[Aa](\d+)",
@@ -85,12 +92,12 @@ def _extract_keys_from_href(href: str, keys: list, seen: set) -> None:
     ):
         for m in re.finditer(pattern, href, re.IGNORECASE):
             k = int(m.group(1))
-            if k not in seen:
-                seen.add(k)
-                keys.append(k)
+            # Set the key, updating it if we found a volume number
+            if k not in keys_map or (keys_map[k] is None and html_vol is not None):
+                keys_map[k] = html_vol
 
 def fetch_catalog_keys(session: requests.Session, title: str, author: str,
-                       manga_type: str = '', page: int = 0) -> list:
+                   manga_type: str = '', page: int = 0) -> dict:
     params: dict = {
         "qu": ["", f"TITLE={title}", f"AUTHOR={author}"],
         "te": "ILS",
@@ -99,7 +106,7 @@ def fetch_catalog_keys(session: requests.Session, title: str, author: str,
     }
 
     _type_lower = (manga_type or '').lower().replace(' ', '-')
-    if _type_lower in ('light-novel', 'novel'):
+    if _type_lower in ('light novel', 'light-novel', 'novel'):
         params["qu"] = [
             "", f"TITLE={title}", f"AUTHOR={author}", "-SUBJECT=Comic"
         ]
@@ -123,19 +130,18 @@ def fetch_catalog_keys(session: requests.Session, title: str, author: str,
     soup = BeautifulSoup(r.text, "html.parser")
     result_text = soup.find(id="searchResultText")
     if result_text and "No results" in result_text.get_text():
-        return []
+        return {}
 
-    keys: list = []
-    seen: set  = set()
+    keys_map: dict = {}
 
     for a in soup.find_all("a", id=re.compile(r"^detailLink")):
-        _extract_keys_from_href(a.get("href", ""), keys, seen)
+        _extract_keys_and_volume(a, keys_map)
 
-    if not keys:
+    if not keys_map:
         for a in soup.find_all("a", href=True):
-            _extract_keys_from_href(a["href"], keys, seen)
+            _extract_keys_and_volume(a, keys_map)
 
-    return keys
+    return keys_map
 
 # ── Step 2: ILSWS API ─────────────────────────────────────────────────────────
 
@@ -195,7 +201,7 @@ def item_status(current_loc: str, due_date) -> str:
         return "In Transit"
     return "Graphic Novel - Young Adult Fiction"
 
-def parse_title_info(data: dict, manga_id: int, availability_id: int) -> tuple:
+def parse_title_info(data: dict, manga_id: int, availability_id: int, manga_type: str, html_volume: int | None = None) -> tuple:
     books = []
     valid_branch_keys = {k.upper() for k in BRANCH_MAPPING}
 
@@ -206,7 +212,16 @@ def parse_title_info(data: dict, manga_id: int, availability_id: int) -> tuple:
                 continue
 
             call_number = call.get("callNumber") or ""
-            volume      = extract_volume_from_callnumber(call_number)
+            
+            is_novel = manga_type.lower() in ('light-novel', 'light novel', 'novel')
+            if is_novel and 'GRAPHIC' in call_number.upper():
+                continue
+
+            # Prioritize the HTML title volume, fall back to call number extraction
+            if html_volume is not None:
+                volume = html_volume
+            else:
+                volume = extract_volume_from_callnumber(call_number)
 
             statuses = [
                 item_status(item.get("currentLocationID"), item.get("dueDate"))
@@ -257,17 +272,20 @@ def scrape(start: int = 1, end: int = 999999,
         log.info(f"[{progress}/{len(pairs_to_scrape)}] (ID {manga_id}) {title!r} by {author!r}")
         print(f"[{progress}/{len(pairs_to_scrape)}] {title}", flush=True)
 
-        catalog_keys: list = []
-        seen_keys:    set  = set()
+        catalog_keys: dict = {}
         page = 0
         while True:
-            keys = fetch_catalog_keys(session, title, author, manga_type, page)
-            log.info(f"  Search page {page}: {len(keys)} catalog keys")
-            for k in keys:
-                if k not in seen_keys:
-                    seen_keys.add(k)
-                    catalog_keys.append(k)
-            if len(keys) < RESULTS_PER_PAGE:
+            keys_map = fetch_catalog_keys(session, title, author, manga_type, page)
+            log.info(f"  Search page {page}: {len(keys_map)} catalog keys")
+            
+            # Merge keys
+            new_keys = 0
+            for k, vol in keys_map.items():
+                if k not in catalog_keys:
+                    catalog_keys[k] = vol
+                    new_keys += 1
+            
+            if len(keys_map) < RESULTS_PER_PAGE:
                 break
             page += 1
             time.sleep(REQUEST_DELAY)
@@ -278,14 +296,14 @@ def scrape(start: int = 1, end: int = 999999,
 
         log.info(f"  {len(catalog_keys)} unique catalog key(s)")
 
-        for key in catalog_keys:
+        for key, html_vol in catalog_keys.items():
             time.sleep(REQUEST_DELAY)
             data = fetch_title_info(session, key, debug_dir)
             if not data:
                 log.warning(f"  No data for key {key}")
                 continue
 
-            books, availability_id = parse_title_info(data, manga_id, availability_id)
+            books, availability_id = parse_title_info(data, manga_id, availability_id, manga_type, html_vol)
             all_books.extend(books)
 
             if books:
