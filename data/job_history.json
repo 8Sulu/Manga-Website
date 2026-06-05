@@ -910,5 +910,23 @@
     "status": "done",
     "message": "inserted 2 LCPL availability rows",
     "at": "2026-06-03T08:44:06.808365+00:00"
+  },
+  {
+    "job": "reset",
+    "status": "done",
+    "message": "✓ Schema recreated · ✓ manga.csv · ✓ libraries.csv · ✓ branches.csv",
+    "at": "2026-06-03T09:17:13.454667+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 1585 LCPL availability rows",
+    "at": "2026-06-03T09:30:13.207697+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-03T10:24:56.488313+00:00"
   }
 ]

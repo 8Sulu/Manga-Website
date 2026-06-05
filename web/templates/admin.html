@@ -24,9 +24,9 @@
       border-radius: var(--r-lg); padding: .75rem 1rem;
       display: flex; flex-direction: column; gap: .25rem;
     }
-    .scrape-status-card.lcpl  { border-left: 3px solid var(--green); }
+    .scrape-status-card.lcpl    { border-left: 3px solid var(--green); }
     .scrape-status-card.broward { border-left: 3px solid var(--amber); }
-    .scrape-status-card.total { border-left: 3px solid var(--purple); }
+    .scrape-status-card.total   { border-left: 3px solid var(--purple); }
     .ssc-label { font-family: var(--mono); font-size: .58rem; letter-spacing: .14em;
                  text-transform: uppercase; color: var(--text3); }
     .ssc-val   { font-family: var(--display); font-size: 1.4rem; font-weight: 700;
@@ -52,7 +52,7 @@
 
     /* ── Undo toast strip ─────────────────────────────────── */
     .undo-bar {
-      display: flex; align-items: center; gap: 8px;
+      align-items: center; gap: 8px;
       font-family: var(--mono); font-size: .7rem;
       padding: .5rem .85rem; background: var(--bg3);
       border: 1px solid var(--amber-brd); border-radius: var(--r);
@@ -513,8 +513,10 @@ async function doReset() {
   }
 }
 
-// ── Clear title availability (with confirm + undo) ─────────────
-let _lastClearedTitle = null;
+// ── Clear title availability ───────────────────────────────────
+// _lastClearedMangaID is populated from the server response (d.manga_id)
+// so it is always a real DB ID, never an undefined variable.
+let _lastClearedTitle   = null;
 let _lastClearedMangaID = null;
 
 async function deleteTitleResultsConfirmed() {
@@ -536,15 +538,15 @@ async function deleteTitleResultsConfirmed() {
         'Content-Type': 'application/json',
         'X-CSRF-Token': getCsrf(),
       },
-      body: JSON.stringify({title, library: library || null})
+      body: JSON.stringify({ title, library: library || null }),
     }).then(r => r.json());
 
     msgEl.style.color = d.ok ? 'var(--green)' : 'var(--red)';
     msgEl.textContent = d.message;
 
     if (d.ok) {
-      _lastClearedTitle = title;
-      _lastClearedMangaID = mangaID;
+      _lastClearedTitle   = title;
+      _lastClearedMangaID = d.manga_id;   // server resolves title → ID and returns it
       document.getElementById('del-results-title-saved').textContent = title;
       undoEl.classList.add('visible');
       loadStats();
@@ -556,6 +558,19 @@ async function deleteTitleResultsConfirmed() {
   }
 }
 
+async function undoClear() {
+  if (!_lastClearedTitle || !_lastClearedMangaID) return;
+  const title   = _lastClearedTitle;
+  const mangaID = _lastClearedMangaID;
+
+  document.getElementById('del-results-undo').classList.remove('visible');
+
+  await rescrapeById(mangaID, title, 'scrape');
+  await rescrapeById(mangaID, title, 'scrape_broward');
+
+  _lastClearedTitle   = null;
+  _lastClearedMangaID = null;
+}
 
 // ── Batch search + re-scrape ───────────────────────────────────
 let batchDebounce;
@@ -572,7 +587,6 @@ async function batchSearch(q) {
       el.innerHTML = items.length
         ? items.map(item => {
             const safeTitle = item.title.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-            
             return `
             <div class="batch-title-row">
               <span class="batch-title-name">${item.title}</span>
@@ -596,23 +610,21 @@ async function clearBatchTitle(mangaID, title) {
         'Content-Type': 'application/json',
         'X-CSRF-Token': getCsrf(),
       },
-      // Send the exact ID
-      body: JSON.stringify({ manga_id: mangaID }) 
+      body: JSON.stringify({ manga_id: mangaID }),
     }).then(r => r.json());
-    
+
     toast(d.message, d.ok ? 'ok' : 'err');
     if (d.ok) { loadStats(); loadMissingCount(); }
   } catch(e) { toast('Error: ' + e.message, 'err'); }
 }
 
-// Replace rescrapeByTitle / rescrapeById with this simplified version:
-async function rescrapeById(mangaId, title, action = 'scrape') {
+async function rescrapeById(mangaID, title, action = 'scrape') {
   try {
     if (pollers[action]) { toast(`A ${action.replace(/_/g, ' ')} is already running`, 'err'); return; }
 
     const form = new FormData();
     form.append('action',     action);
-    form.append('manga_id',   mangaId); // Send ID directly! No more 'range' hack.
+    form.append('manga_id',   mangaID);
     form.append('csrf_token', getCsrf());
 
     const btn     = document.getElementById('btn-' + action);
@@ -634,21 +646,6 @@ async function rescrapeById(mangaId, title, action = 'scrape') {
     updateStickyFooter(action, 0, 'starting…', true);
     pollers[action] = setInterval(() => pollJob(action, btn, stopBtn), POLL_MS);
   } catch(e) { toast('Re-scrape failed: ' + e.message, 'err'); }
-}
-
-// Update undoClear to properly pass mangaId
-async function undoClear() {
-  if (!_lastClearedTitle || !_lastClearedMangaId) return;
-  const title = _lastClearedTitle;
-  const mangaId = _lastClearedMangaId;
-  
-  document.getElementById('del-results-undo').classList.remove('visible');
-  
-  await rescrapeById(mangaId, title, 'scrape');
-  await rescrapeById(mangaId, title, 'scrape_broward');
-  
-  _lastClearedTitle = null;
-  _lastClearedMangaId = null;
 }
 
 // ── Job history ────────────────────────────────────────────────
