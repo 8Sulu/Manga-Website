@@ -67,7 +67,6 @@
       user-select: none; transition: all .12s;
     }
     .mal-status-item:hover { border-color: var(--border3); }
-    /* tri-state: empty = neutral, include = green check, exclude = red x */
     .mal-status-item[data-state="include"] {
       background: var(--green-bg); border-color: var(--green-brd); color: var(--green);
     }
@@ -93,6 +92,23 @@
       font-family: var(--mono); font-size: .58rem; color: var(--text3);
       margin-top: .4rem; margin-bottom: .2rem; opacity: .7;
     }
+
+    /* ── Pagination ──────────────────────────────────────────── */
+    .pagination-row {
+      display: flex; align-items: center; justify-content: center;
+      gap: 4px; margin-top: 2rem; flex-wrap: wrap;
+    }
+    .pg-btn {
+      font-family: var(--mono); font-size: .7rem; padding: 5px 11px;
+      background: var(--bg3); border: 1px solid var(--border2);
+      border-radius: var(--r); color: var(--text3); cursor: pointer;
+      text-decoration: none; transition: all .12s; display: inline-block;
+    }
+    .pg-btn:hover  { border-color: var(--border3); color: var(--text); }
+    .pg-btn.active { background: var(--purple-bg); border-color: var(--purple-brd); color: var(--purple); }
+    .pg-btn.disabled { opacity: .35; pointer-events: none; }
+    .pg-ellipsis { font-family: var(--mono); font-size: .7rem; color: var(--text3); padding: 5px 4px; }
+    .pg-info { font-family: var(--mono); font-size: .65rem; color: var(--text3); margin-left: .5rem; }
   </style>
 </head>
 <body>
@@ -113,7 +129,6 @@
       <button class="mal-load-btn" id="mal-load-btn" onclick="loadMalList()">Load my MAL list</button>
     </div>
     <div class="mal-status-row" id="mal-status-row">
-      <!-- Rendered after MAL list loads; statuses are tri-state per category -->
       <span style="font-family:var(--mono);font-size:.68rem;color:var(--text3)">
         Click "Load my MAL list" to filter results by your reading status.
       </span>
@@ -127,7 +142,13 @@
 
   <!-- ── Results bar ───────────────────────────────────────────── -->
   <div class="results-bar">
-    <div class="results-count-big" id="results-count">{{ count }} title{{ 's' if count != 1 }}</div>
+    <div class="results-count-big" id="results-count">
+      {%- if total_pages > 1 -%}
+        {{ (page - 1) * per_page + 1 }}–{{ (page - 1) * per_page + results|length }} of {{ count }} title{{ 's' if count != 1 }}
+      {%- else -%}
+        {{ count }} title{{ 's' if count != 1 }}
+      {%- endif -%}
+    </div>
     <div class="sort-btns">
       <button class="sort-btn active" onclick="sortCards('score',this)">Score</button>
       <button class="sort-btn" onclick="sortCards('title',this)">A–Z</button>
@@ -330,6 +351,47 @@
     {% endfor %}
   </div>
 
+  <!-- ── Pagination ─────────────────────────────────────────────── -->
+  {% if total_pages > 1 %}
+  {# Build base URL preserving all filters except page #}
+  {% set base_qs %}{% for k, v in request.args.items() %}{% if k != 'page' %}&{{ k }}={{ v | urlencode }}{% endif %}{% endfor %}{% endset %}
+  <div class="pagination-row">
+    {# Prev #}
+    {% if page > 1 %}
+    <a class="pg-btn" href="/search?page={{ page - 1 }}{{ base_qs }}">← Prev</a>
+    {% else %}
+    <span class="pg-btn disabled">← Prev</span>
+    {% endif %}
+
+    {# Page numbers — show window of 5 around current page #}
+    {% set p_start = [1, page - 2] | max %}
+    {% set p_end   = [total_pages, page + 2] | min %}
+
+    {% if p_start > 1 %}
+    <a class="pg-btn" href="/search?page=1{{ base_qs }}">1</a>
+    {% if p_start > 2 %}<span class="pg-ellipsis">…</span>{% endif %}
+    {% endif %}
+
+    {% for p in range(p_start, p_end + 1) %}
+    <a class="pg-btn {{ 'active' if p == page }}" href="/search?page={{ p }}{{ base_qs }}">{{ p }}</a>
+    {% endfor %}
+
+    {% if p_end < total_pages %}
+    {% if p_end < total_pages - 1 %}<span class="pg-ellipsis">…</span>{% endif %}
+    <a class="pg-btn" href="/search?page={{ total_pages }}{{ base_qs }}">{{ total_pages }}</a>
+    {% endif %}
+
+    {# Next #}
+    {% if page < total_pages %}
+    <a class="pg-btn" href="/search?page={{ page + 1 }}{{ base_qs }}">Next →</a>
+    {% else %}
+    <span class="pg-btn disabled">Next →</span>
+    {% endif %}
+
+    <span class="pg-info">page {{ page }} of {{ total_pages }}</span>
+  </div>
+  {% endif %}
+
   <div style="font-family:var(--mono);font-size:.63rem;color:var(--text3);margin-top:.75rem;text-align:center">
     Click a card to expand · Click a volume chip to search the catalog · LCPL = Leon County · BCL = Broward
   </div>
@@ -362,6 +424,7 @@ document.getElementById('lib-filter-row').addEventListener('click', e => {
   const val = pill.dataset.val;
   if (val) url.searchParams.set('library', val);
   else     url.searchParams.delete('library');
+  url.searchParams.delete('page');   // reset to page 1 on filter change
   window.location.href = url.toString();
 });
 
@@ -415,13 +478,12 @@ function sortCards(key, btn) {
 function removeFilter(key) {
   const url = new URL(window.location.href);
   url.searchParams.delete(key);
+  url.searchParams.delete('page');   // reset to page 1
   window.location.href = url.toString();
 }
 
 // ── MAL list integration ───────────────────────────────────────
-// malData: { manga_id (number): { status: string, ... } }
 let malData = null;
-// malFilters: { status_key: 'include' | 'exclude' | '' }
 let malFilters = {
   reading: '', completed: '', on_hold: '', dropped: '', plan_to_read: ''
 };
@@ -447,11 +509,10 @@ async function loadMalList() {
     const resp = await fetch('/api/mal/mangalist');
     const json = await resp.json();
     if (!json.ok) throw new Error(json.message || 'Failed to load MAL list');
-    malData = json.data;   // { "123": { status, score, num_volumes_read }, ... }
+    malData = json.data;
 
     loading.style.display = 'none';
 
-    // Count per status
     const counts = { reading: 0, completed: 0, on_hold: 0, dropped: 0, plan_to_read: 0 };
     Object.values(malData).forEach(entry => {
       if (counts.hasOwnProperty(entry.status)) counts[entry.status]++;
@@ -513,11 +574,9 @@ function applyMalFilters() {
 
     let hidden = false;
 
-    // If there are any "include" filters, title must be in one of them
     if (includeStatuses.length > 0) {
       if (!userStatus || !includeStatuses.includes(userStatus)) hidden = true;
     }
-    // If there are any "exclude" filters, title must NOT be in any of them
     if (!hidden && excludeStatuses.includes(userStatus)) {
       hidden = true;
     }
@@ -527,15 +586,20 @@ function applyMalFilters() {
     if (!hidden) visCount++;
   });
 
-  // Update count badge
   const countEl = document.getElementById('results-count');
   if (countEl) {
     const total = cards.length;
     countEl.textContent = allNeutral
-      ? `${total} title${total !== 1 ? 's' : ''}`
+      ? countEl.dataset.full
       : `${visCount} of ${total} title${total !== 1 ? 's' : ''} shown`;
   }
 }
+
+// Store the server-rendered count text so MAL filter can restore it
+(function() {
+  const el = document.getElementById('results-count');
+  if (el) el.dataset.full = el.textContent.trim();
+})();
 </script>
 </body>
 </html>

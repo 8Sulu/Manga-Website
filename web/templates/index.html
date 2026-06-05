@@ -168,6 +168,44 @@
               <option value="Woodville Branch Library">Woodville</option>
               <option value="Jane G. Sauls Fort Braden Branch Library">Fort Braden</option>
             </optgroup>
+            <optgroup label="Broward County (BCL)">
+              <option value="Main Library">Main Library (Fort Lauderdale)</option>
+              <option value="Northwest Regional Library">NW Regional (Coral Springs)</option>
+              <option value="North Regional/Broward College Library">N Regional/BC (Coconut Creek)</option>
+              <option value="South Regional/Broward College Library">S Regional/BC (Pembroke Pines)</option>
+              <option value="Southwest Regional Library">SW Regional (Pembroke Pines)</option>
+              <option value="West Regional Library">W Regional (Plantation)</option>
+              <option value="Hollywood Branch">Hollywood</option>
+              <option value="Pompano Beach Library &amp; Cultural Center">Pompano Beach</option>
+              <option value="Miramar Branch Library &amp; Education Center">Miramar</option>
+              <option value="Weston Branch">Weston</option>
+              <option value="Tamarac Branch">Tamarac</option>
+              <option value="Sunrise Dan Pearl Branch">Sunrise</option>
+              <option value="Margate Catharine Young Branch">Margate</option>
+              <option value="Deerfield Beach Percy White Branch">Deerfield Beach</option>
+              <option value="Hallandale Beach Branch">Hallandale Beach</option>
+              <option value="Davie/Cooper City Branch">Davie / Cooper City</option>
+              <option value="African American Research Library &amp; Cultural Center">AARLCC (Fort Lauderdale)</option>
+              <option value="Lauderhill Central Park Library">Lauderhill Central Park</option>
+              <option value="Lauderhill Towne Centre Branch">Lauderhill Towne Centre</option>
+              <option value="Lauderdale Lakes Library/Educational &amp; Cultural Center">Lauderdale Lakes</option>
+              <option value="Pembroke Pines/Walter C. Young Resource Center">Pembroke Pines / Walter Young</option>
+              <option value="North Lauderdale Saraniero Branch">North Lauderdale</option>
+              <option value="Imperial Point Branch">Imperial Point</option>
+              <option value="Carver Ranches Branch">Carver Ranches (West Park)</option>
+              <option value="Century Plaza/Leon Slatin Branch">Century Plaza / Leon Slatin</option>
+              <option value="Dania Beach Paul DeMaio Branch">Dania Beach</option>
+              <option value="Hollywood Beach Bernice P. Oster Branch">Hollywood Beach</option>
+              <option value="Riverland Branch">Riverland (Fort Lauderdale)</option>
+              <option value="Beach Branch">Beach (Pompano Beach)</option>
+              <option value="Jan Moran Collier City Learning Library">Jan Moran Collier City</option>
+              <option value="Fort Lauderdale Reading Center">Fort Lauderdale Reading Center</option>
+              <option value="Galt Ocean Mile Reading Center">Galt Ocean Mile</option>
+              <option value="Tyrone Bryant Branch">Tyrone Bryant (Fort Lauderdale)</option>
+              <option value="Northwest Branch">Northwest Branch (Pompano Beach)</option>
+              <option value="Marta,Beth Friedman Stirling Road Branch">Stirling Road (Hollywood)</option>
+              <option value="Nova Southeastern University Alvin Sherman Library">NSU Alvin Sherman Library</option>
+            </optgroup>
           </select>
         </div>
 
@@ -310,7 +348,6 @@ document.addEventListener('click', e => {
 });
 
 // ── Pill toggles ───────────────────────────────────────────────
-// Groups: avail (single-select), library (single-select), no_vol1 (toggle)
 document.getElementById('filter-pills').addEventListener('click', e => {
   const pill = e.target.closest('.pill-btn');
   if (!pill || !pill.dataset.group) return;
@@ -320,7 +357,6 @@ document.getElementById('filter-pills').addEventListener('click', e => {
   const val    = pill.dataset.val;
 
   if (group === 'no_vol1') {
-    // Toggle: active → set value 1, inactive → clear
     const isActive = pill.classList.contains('active');
     pill.classList.toggle('active', !isActive);
     document.getElementById('f-no-vol1').value = isActive ? '' : '1';

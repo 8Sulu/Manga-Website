@@ -1013,6 +1013,7 @@ def search():
         count=total_count,
         page=page,
         total_pages=total_pages,
+        per_page=per_page,
         filters=filters,
         has_filters=any(v for k, v in filters.items()),
         LCPL_LIBRARY_ID=LCPL_LIBRARY_ID,

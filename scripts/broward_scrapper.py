@@ -252,6 +252,8 @@ def get_search_results(session: requests.Session, title: str, author: str,
 
         if _is_novel(manga_type):
             params.append(("qu", "-SUBJECT=Comic"))
+            params.append(("qf", "-SUBJECT\tSubject\tGraphic novels.\tGraphic novels."))
+            params.append(("qf", "-SUBJECT\tSubject\tGraphic novels -- Juvenile fiction.\tGraphic novels -- Juvenile fiction."))
 
         if offset > 0:
             params.append(("rw", str(offset)))
