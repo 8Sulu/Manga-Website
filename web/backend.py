@@ -25,6 +25,7 @@ app.config.update(
     SESSION_FILE_THRESHOLD   = 500,          # max files before oldest are purged
     SESSION_PERMANENT        = False,
     SESSION_USE_SIGNER       = True,         # HMAC-signs the session ID cookie
+    SESSION_COOKIE_SECURE    = True,
     SESSION_COOKIE_HTTPONLY  = True,
     SESSION_COOKIE_SAMESITE  = "Lax",
 )

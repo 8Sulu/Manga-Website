@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Search Results — Manga Tracker</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
   <style>
     .page-header {
       padding: 1.25rem 0 1rem; border-bottom: 1px solid var(--border); margin-bottom: 1.5rem;
@@ -300,7 +301,7 @@
       <div class="manga-body">
         <div class="manga-card-title">{{ r.Title }}</div>
         <div class="manga-card-meta">
-          {{ r.Type }} · {{ r.vol_count }} vol{{ 's' if r.vol_count != 1 }}{% if r.Volumes %} of {{ r.Volumes }}{% endif %}
+          {{ r.Type }} · {{ r.vol_count }} of {{ r.Volumes or '?' }} vol{{ 's' if r.Volumes != 1 else '' }}
         </div>
         <div class="tl-row">
           {% if r.avail_count %}<span class="tl-chip tl-avail"><span class="tl-dot"></span>{{ r.avail_count }} available</span>{% endif %}
