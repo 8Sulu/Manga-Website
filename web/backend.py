@@ -1,5 +1,6 @@
 from flask import (Flask, render_template, request, jsonify, redirect,
                    url_for, session, make_response)
+from flask_session import Session
 import csv, json, sys, threading, functools, os, hashlib, secrets, time
 from pathlib import Path
 from datetime import datetime, timezone
@@ -13,6 +14,22 @@ app = Flask(__name__, static_folder='static')
 app.secret_key = os.getenv('FLASK_SECRET_KEY', secrets.token_hex(32))
 ADMIN_PASSWORD   = os.getenv('ADMIN_PASSWORD', '')
 JOB_HISTORY_PATH = DATA_DIR / "job_history.json"
+
+# ── Server-side session (filesystem) ──────────────────────────────────────────
+# Keeps large payloads (MAL list) off the cookie, which has a 4 KB limit.
+_SESSION_DIR = DATA_DIR / "flask_sessions"
+_SESSION_DIR.mkdir(parents=True, exist_ok=True)
+app.config.update(
+    SESSION_TYPE             = "filesystem",
+    SESSION_FILE_DIR         = str(_SESSION_DIR),
+    SESSION_FILE_THRESHOLD   = 500,          # max files before oldest are purged
+    SESSION_PERMANENT        = False,
+    SESSION_USE_SIGNER       = True,         # HMAC-signs the session ID cookie
+    SESSION_COOKIE_HTTPONLY  = True,
+    SESSION_COOKIE_SAMESITE  = "Lax",
+)
+Session(app)
+
 
 # ── Security headers ───────────────────────────────────────────────────────────
 
@@ -315,12 +332,6 @@ def _is_novel(manga_type: str) -> bool:
 
 def _broward_search_url(title: str, author: str, manga_type: str = '',
                         volume: int | None = None) -> str:
-    """
-    Build Broward catalog search URL.
-    - Novels/light novels exclude the 'Graphic novels.' subject to avoid manga hits.
-    - Optional volume number is appended as an extra qu= term.
-    - Results sorted by publication date ascending (st=PA) so vol 1 is first.
-    """
     et = _quote_plus(title)
     ea = _quote_plus(author or '')
     base = (f"https://broward.ent.sirsi.net/client/en_US/default/search/results"
@@ -330,7 +341,7 @@ def _broward_search_url(title: str, author: str, manga_type: str = '',
         base += "&qu=-SUBJECT%3DComic"
     if volume is not None and volume > 0:
         base += f"&qu={volume}"
-    base += "&st=PA"   # publication date ascending → vol 1 first
+    base += "&st=PA"
     return base
 
 def _lcpl_search_url(title: str, author: str, manga_type: str = '', volume: int | None = None) -> str:
@@ -464,7 +475,6 @@ def admin():
                            job_history=list(reversed(_read_job_history()))[:30])
 
 def _handle_admin_post():
-    # Validate CSRF for all POST actions
     token = (request.form.get('csrf_token')
              or (request.get_json(silent=True) or {}).get('csrf_token', '')
              or request.headers.get('X-CSRF-Token', ''))
@@ -491,7 +501,7 @@ def _handle_admin_post():
     if action == 'get_manga':
         offset = request.form.get('offset', '0')
         try:
-            offset = str(int(offset))   # validate it's a number
+            offset = str(int(offset))
         except ValueError:
             return jsonify({'ok': False, 'message': 'Invalid offset'}), 400
         ok, status, msg = _start_job(
@@ -513,11 +523,9 @@ def _start_scrape_job(action: str):
 
     cmd = [sys.executable, str(SCRIPTS_DIR / script)]
 
-    # Exact Title Rescrape -> Use ID
     if manga_id:
         cmd.extend(['--manga-ids', manga_id])
         
-    # 'New Only' Checked -> Get missing IDs, optionally constrained by range
     elif only_new:
         missing_ids = _missing_manga_ids(lib_pattern)
         if not missing_ids:
@@ -533,7 +541,6 @@ def _start_scrape_job(action: str):
                 
         cmd.extend(['--manga-ids', ','.join(map(str, missing_ids))])
         
-    # Standard Batch Scrape -> Use chunked Range
     elif range_str:
         lo, hi = parse_range_str(range_str, _titles_count())
         cmd.extend(['--range', f'{lo}-{hi}'])
@@ -548,7 +555,6 @@ def _start_scrape_job(action: str):
 @admin_required
 def admin_reset():
     global _library_id_cache
-    # CSRF check
     token = (request.form.get('csrf_token')
              or (request.get_json(silent=True) or {}).get('csrf_token', '')
              or request.headers.get('X-CSRF-Token', ''))
@@ -617,7 +623,6 @@ def api_suggestions():
     if _rate_limited(f'suggest:{ip}', limit=120, window=60):
         return jsonify([]), 429
     try:
-        # Fetch MangaID directly
         rows = execute_query(
             'SELECT MangaID, Title, Type, Score FROM manga WHERE Title LIKE %s '
             'ORDER BY Score DESC LIMIT 8',
@@ -731,16 +736,9 @@ def api_title_volumes(manga_id):
         return jsonify({'error': str(e)}), 500
 
 # ── MAL manga list proxy ───────────────────────────────────────────────────────
-# The user's MAL access token is in the server .env — the browser never sees it.
-# The frontend fetches /api/mal/mangalist which proxies the MAL API server-side.
 
 @app.route('/api/mal/mangalist')
 def api_mal_mangalist():
-    """
-    Proxy the authenticated user's MAL manga list.
-    Returns {manga_id: status} for all entries so the frontend can filter.
-    Supports pagination internally (MAL max 1000 per request).
-    """
     ip = _client_ip()
     if _rate_limited(f'mal:{ip}', limit=10, window=60):
         return jsonify({'ok': False, 'message': 'Rate limited'}), 429
@@ -753,7 +751,7 @@ def api_mal_mangalist():
     all_statuses: dict[int, dict] = {}
     offset = 0
     limit  = 1000
-    max_pages = 10   # safety cap — 10,000 entries
+    max_pages = 10
 
     for _ in range(max_pages):
         url = (f"https://api.myanimelist.net/v2/users/@me/mangalist"
@@ -765,7 +763,6 @@ def api_mal_mangalist():
             return jsonify({'ok': False, 'message': f'MAL API error: {e}'}), 502
 
         if resp.status_code == 401:
-            # Try token refresh
             from services.mal_client import refresh_tokens
             new_token = refresh_tokens()
             if not new_token:
@@ -791,7 +788,6 @@ def api_mal_mangalist():
                     'num_volumes_read':  lst_status.get('num_volumes_read', 0),
                 }
 
-        # Check if there's a next page
         paging = data.get('paging', {})
         if not paging.get('next'):
             break
@@ -801,13 +797,6 @@ def api_mal_mangalist():
 
 @app.route('/api/mal/set_filter', methods=['POST'])
 def api_mal_set_filter():
-    """
-    Store the caller's MAL list data and/or active filter state in the Flask
-    session. Called by the results page after loading the list or toggling a
-    pill. Payload shape:
-        { data: {...},    filters: {reading: 'include'|'exclude'|'', ...} }
-    'data' is optional on subsequent toggle calls (filters-only update).
-    """
     ip = _client_ip()
     if _rate_limited(f'mal_filter:{ip}', limit=60, window=60):
         return jsonify({'ok': False, 'message': 'Rate limited'}), 429
@@ -833,7 +822,6 @@ def api_mal_set_filter():
  
 @app.route('/api/mal/clear_filter', methods=['POST'])
 def api_mal_clear_filter():
-    """Remove MAL list and filter state from the Flask session."""
     session.pop('mal_data',    None)
     session.pop('mal_filters', None)
     return jsonify({'ok': True})
@@ -867,7 +855,7 @@ def search():
     volume       = request.args.get('volume',   '').strip()
     avail_filter = request.args.get('avail',    '').strip()
     lib_filter   = request.args.get('library',  '').strip()
-    no_vol1      = request.args.get('no_vol1',  '').strip()  # exclude titles missing vol 1
+    no_vol1      = request.args.get('no_vol1',  '').strip()
 
     conditions = ['b.BranchName IS NOT NULL', 'b.BranchID IS NOT NULL']
     params = []
@@ -891,7 +879,6 @@ def search():
     """
     rows = execute_query(sql, params)
 
-    # ── Group: title → library → volume → {branch_id: status} ────────────────
     titles_map: dict = {}
     for r in rows:
         t   = r['Title']
@@ -937,10 +924,8 @@ def search():
         if lid == BROWARD_LIBRARY_ID: td['has_broward'] = True
         elif lid == LCPL_LIBRARY_ID:  td['has_lcpl']    = True
 
-    # ── Build final grouped list ───────────────────────────────────────────────
     grouped = []
     for td in titles_map.values():
-        # Calculate distinct volume-level rollup counts
         volume_best_status = {}
         has_vol1 = False
         for linfo in td['lib_data'].values():
@@ -998,7 +983,6 @@ def search():
                 'vol_list':     vol_list,
             })
 
-        # Apply filters in Python after normalization
         if avail_filter == 'available' and avail_count == 0:
             continue
         if avail_filter == 'out' and out_count == 0:
@@ -1045,7 +1029,6 @@ def search():
             'is_novel':     _is_novel(manga_type),
         })
 
-    # Pagination handling
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 50, type=int)
     
