@@ -21,13 +21,10 @@
       padding: .35rem .55rem; font-family: var(--mono); font-size: .62rem;
       transition: border-color .12s, background .12s;
     }
-    /* Clickable volume chips */
     a.vol-chip {
       display: block; text-decoration: none; color: inherit; cursor: pointer;
     }
-    a.vol-chip:hover {
-      border-color: var(--purple-brd); background: var(--purple-bg);
-    }
+    a.vol-chip:hover { border-color: var(--purple-brd); background: var(--purple-bg); }
     a.vol-chip:hover .vol-chip-num { color: var(--purple); }
     .vol-chip-num { color: var(--text3); margin-bottom: 3px; font-size: .58rem; transition: color .12s; }
     .vol-chip-branches { display: flex; flex-direction: column; gap: 2px; }
@@ -73,6 +70,7 @@
     .mal-status-item[data-state="exclude"] {
       background: var(--red-bg); border-color: var(--red-brd); color: var(--red);
     }
+    .mal-status-item.mal-busy { opacity: .55; pointer-events: none; }
     .mal-status-icon { font-size: .75rem; min-width: .85rem; text-align: center; }
     .mal-loading { font-family: var(--mono); font-size: .68rem; color: var(--text3); }
     .mal-error   { font-family: var(--mono); font-size: .68rem; color: var(--amber); }
@@ -82,21 +80,31 @@
       color: var(--purple); border-radius: var(--r); cursor: pointer;
     }
     .mal-load-btn:hover { background: var(--purple); color: #fff; }
-
-    /* Cards hidden/dim by MAL filter */
-    .manga-card.mal-hidden { display: none !important; }
-    .manga-card.mal-dimmed { opacity: .35; filter: grayscale(.6); }
-
-    /* Vol link hint tooltip */
-    .vol-link-hint {
-      font-family: var(--mono); font-size: .58rem; color: var(--text3);
-      margin-top: .4rem; margin-bottom: .2rem; opacity: .7;
+    .mal-clear-btn {
+      font-family: var(--mono); font-size: .63rem; padding: 3px 9px;
+      background: none; border: 1px solid var(--border2);
+      color: var(--text3); border-radius: var(--r); cursor: pointer;
     }
+    .mal-clear-btn:hover { border-color: var(--red-brd); color: var(--red); }
+    .mal-apply-btn {
+      font-family: var(--mono); font-size: .65rem; padding: 4px 14px;
+      background: linear-gradient(135deg, var(--purple2), var(--purple));
+      border: none; color: #fff; border-radius: var(--r); cursor: pointer;
+      display: none; box-shadow: 0 2px 12px rgba(157,125,255,.3);
+      transition: box-shadow .15s, transform .15s;
+    }
+    .mal-apply-btn:hover { box-shadow: 0 4px 20px rgba(157,125,255,.45); transform: translateY(-1px); }
+    .mal-apply-btn.visible { display: inline-flex; align-items: center; gap: 5px; }
+    .mal-apply-btn.busy { opacity: .55; pointer-events: none; transform: none !important; }
+    .mal-status-item.pending { outline: 2px solid var(--purple-brd); outline-offset: 2px; }
 
     /* ── Pagination ──────────────────────────────────────────── */
     .pagination-row {
       display: flex; align-items: center; justify-content: center;
       gap: 4px; margin-top: 2rem; flex-wrap: wrap;
+    }
+    .pagination-row.top {
+      margin-top: .5rem; margin-bottom: 1rem; justify-content: flex-end;
     }
     .pg-btn {
       font-family: var(--mono); font-size: .7rem; padding: 5px 11px;
@@ -109,6 +117,12 @@
     .pg-btn.disabled { opacity: .35; pointer-events: none; }
     .pg-ellipsis { font-family: var(--mono); font-size: .7rem; color: var(--text3); padding: 5px 4px; }
     .pg-info { font-family: var(--mono); font-size: .65rem; color: var(--text3); margin-left: .5rem; }
+
+    /* Vol link hint */
+    .vol-link-hint {
+      font-family: var(--mono); font-size: .58rem; color: var(--text3);
+      margin-top: .4rem; margin-bottom: .2rem; opacity: .7;
+    }
   </style>
 </head>
 <body>
@@ -124,10 +138,38 @@
   <div class="mal-panel" id="mal-panel">
     <div class="mal-header">
       <span class="mal-title">Filter by MAL list</span>
-      <span class="mal-loading" id="mal-loading" style="display:none">Loading your list…</span>
+      <span class="mal-loading" id="mal-loading" style="display:none">Loading…</span>
       <span class="mal-error"   id="mal-error"   style="display:none"></span>
+      {% if not mal_loaded %}
       <button class="mal-load-btn" id="mal-load-btn" onclick="loadMalList()">Load my MAL list</button>
+      {% else %}
+      <button class="mal-apply-btn" id="mal-apply-btn" onclick="applyMalFilters()">Apply</button>
+      <button class="mal-clear-btn" onclick="clearMalFilter()" title="Clear MAL filter and list">✕ Clear</button>
+      {% endif %}
     </div>
+
+    {% if mal_loaded %}
+    {# Server-rendered pills — states come from the Flask session #}
+    <div class="mal-status-row" id="mal-status-row">
+      {% set icons = {'include': '✓', 'exclude': '✕', '': '◦'} %}
+      {% for key, label in [('reading','Reading'),('completed','Completed'),('on_hold','On Hold'),('dropped','Dropped'),('plan_to_read','Plan to Read')] %}
+      {% set state = mal_filters.get(key, '') %}
+      <div class="mal-status-item" data-status="{{ key }}" data-state="{{ state }}"
+           onclick="toggleMalStatus('{{ key }}', this)">
+        <span class="mal-status-icon">{{ icons.get(state, '◦') }}</span>
+        <span>{{ label }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    <div style="font-family:var(--mono);font-size:.62rem;color:var(--text3);margin-top:.6rem">
+      Click once to <span style="color:var(--green)">✓ include only</span>,
+      twice to <span style="color:var(--red)">✕ exclude</span>,
+      three times to reset · hit <b style="color:var(--text2)">Apply</b> to filter results.
+      {% if mal_active %}
+      <span style="color:var(--amber);margin-left:.5rem">⚠ Filter active — pagination reflects filtered results</span>
+      {% endif %}
+    </div>
+    {% else %}
     <div class="mal-status-row" id="mal-status-row">
       <span style="font-family:var(--mono);font-size:.68rem;color:var(--text3)">
         Click "Load my MAL list" to filter results by your reading status.
@@ -138,6 +180,7 @@
       twice to <span style="color:var(--red)">✕ exclude</span>,
       three times to reset.
     </div>
+    {% endif %}
   </div>
 
   <!-- ── Results bar ───────────────────────────────────────────── -->
@@ -156,6 +199,44 @@
       <button class="sort-btn" onclick="sortCards('vols',this)">Volumes</button>
     </div>
   </div>
+
+  <!-- ── Top pagination ────────────────────────────────────────── -->
+  {% if total_pages > 1 %}
+  {# base_qs reused by the bottom pagination block #}
+  {% set base_qs %}{% for k, v in request.args.items() %}{% if k != 'page' %}&{{ k }}={{ v | urlencode }}{% endif %}{% endfor %}{% endset %}
+  <div class="pagination-row top">
+    {% if page > 1 %}
+    <a class="pg-btn" href="/search?page={{ page - 1 }}{{ base_qs }}">← Prev</a>
+    {% else %}
+    <span class="pg-btn disabled">← Prev</span>
+    {% endif %}
+
+    {% set p_start = [1, page - 2] | max %}
+    {% set p_end   = [total_pages, page + 2] | min %}
+
+    {% if p_start > 1 %}
+    <a class="pg-btn" href="/search?page=1{{ base_qs }}">1</a>
+    {% if p_start > 2 %}<span class="pg-ellipsis">…</span>{% endif %}
+    {% endif %}
+
+    {% for p in range(p_start, p_end + 1) %}
+    <a class="pg-btn {{ 'active' if p == page }}" href="/search?page={{ p }}{{ base_qs }}">{{ p }}</a>
+    {% endfor %}
+
+    {% if p_end < total_pages %}
+    {% if p_end < total_pages - 1 %}<span class="pg-ellipsis">…</span>{% endif %}
+    <a class="pg-btn" href="/search?page={{ total_pages }}{{ base_qs }}">{{ total_pages }}</a>
+    {% endif %}
+
+    {% if page < total_pages %}
+    <a class="pg-btn" href="/search?page={{ page + 1 }}{{ base_qs }}">Next →</a>
+    {% else %}
+    <span class="pg-btn disabled">Next →</span>
+    {% endif %}
+
+    <span class="pg-info">page {{ page }} of {{ total_pages }}</span>
+  </div>
+  {% endif %}
 
   <!-- ── Library filter pills ──────────────────────────────────── -->
   <div class="lib-filter-row" id="lib-filter-row">
@@ -269,22 +350,17 @@
              id="lib-panel-{{ r.MangaID }}-{{ lib.library_id }}">
 
           {% if lib.vol_list %}
-            <div class="section-label" style="margin-top:.25rem">
-              Volumes — {{ lib_label }}
-            </div>
+            <div class="section-label" style="margin-top:.25rem">Volumes — {{ lib_label }}</div>
             <div class="vol-link-hint">↗ Click a volume to search the catalog for that volume</div>
 
             <div class="vol-grid">
               {% for vol_entry in lib.vol_list %}
-              {# Build per-volume catalog URL #}
               {% if is_broward %}
                 {% set vol_url = r.broward_url ~ ('&qu=' ~ vol_entry.vol if vol_entry.vol > 0 else '') %}
               {% else %}
                 {% set vol_url = r.lcpl_url ~ ('&qu=' ~ vol_entry.vol if vol_entry.vol > 0 else '') %}
               {% endif %}
-
-              <a class="vol-chip"
-                 href="{{ vol_url }}" target="_blank" rel="noopener"
+              <a class="vol-chip" href="{{ vol_url }}" target="_blank" rel="noopener"
                  onclick="event.stopPropagation()">
                 <div class="vol-chip-num">
                   {%- if vol_entry.vol == 0 %}Series{% else %}Vol. {{ vol_entry.vol }}{% endif -%}
@@ -326,7 +402,6 @@
               No availability data scraped yet.
             </div>
           {% endif %}
-
         </div>
         {% endfor %}
 
@@ -351,19 +426,15 @@
     {% endfor %}
   </div>
 
-  <!-- ── Pagination ─────────────────────────────────────────────── -->
+  <!-- ── Bottom pagination ──────────────────────────────────────── -->
   {% if total_pages > 1 %}
-  {# Build base URL preserving all filters except page #}
-  {% set base_qs %}{% for k, v in request.args.items() %}{% if k != 'page' %}&{{ k }}={{ v | urlencode }}{% endif %}{% endfor %}{% endset %}
   <div class="pagination-row">
-    {# Prev #}
     {% if page > 1 %}
     <a class="pg-btn" href="/search?page={{ page - 1 }}{{ base_qs }}">← Prev</a>
     {% else %}
     <span class="pg-btn disabled">← Prev</span>
     {% endif %}
 
-    {# Page numbers — show window of 5 around current page #}
     {% set p_start = [1, page - 2] | max %}
     {% set p_end   = [total_pages, page + 2] | min %}
 
@@ -381,7 +452,6 @@
     <a class="pg-btn" href="/search?page={{ total_pages }}{{ base_qs }}">{{ total_pages }}</a>
     {% endif %}
 
-    {# Next #}
     {% if page < total_pages %}
     <a class="pg-btn" href="/search?page={{ page + 1 }}{{ base_qs }}">Next →</a>
     {% else %}
@@ -424,7 +494,7 @@ document.getElementById('lib-filter-row').addEventListener('click', e => {
   const val = pill.dataset.val;
   if (val) url.searchParams.set('library', val);
   else     url.searchParams.delete('library');
-  url.searchParams.delete('page');   // reset to page 1 on filter change
+  url.searchParams.delete('page');
   window.location.href = url.toString();
 });
 
@@ -478,28 +548,18 @@ function sortCards(key, btn) {
 function removeFilter(key) {
   const url = new URL(window.location.href);
   url.searchParams.delete(key);
-  url.searchParams.delete('page');   // reset to page 1
+  url.searchParams.delete('page');
   window.location.href = url.toString();
 }
 
-// ── MAL list integration ───────────────────────────────────────
-let malData = null;
-let malFilters = {
-  reading: '', completed: '', on_hold: '', dropped: '', plan_to_read: ''
-};
-const MAL_STATUS_LABELS = {
-  reading:       'Reading',
-  completed:     'Completed',
-  on_hold:       'On Hold',
-  dropped:       'Dropped',
-  plan_to_read:  'Plan to Read',
-};
-
+// ── MAL list — load ────────────────────────────────────────────
+// Called only on first load (button press). Fetches from MAL API,
+// POSTs data + empty filters to Flask session, then reloads so the
+// server-rendered panel appears.
 async function loadMalList() {
-  const loadBtn  = document.getElementById('mal-load-btn');
-  const loading  = document.getElementById('mal-loading');
-  const errorEl  = document.getElementById('mal-error');
-  const statusRow = document.getElementById('mal-status-row');
+  const loadBtn = document.getElementById('mal-load-btn');
+  const loading = document.getElementById('mal-loading');
+  const errorEl = document.getElementById('mal-error');
 
   loadBtn.style.display  = 'none';
   loading.style.display  = 'inline';
@@ -509,23 +569,22 @@ async function loadMalList() {
     const resp = await fetch('/api/mal/mangalist');
     const json = await resp.json();
     if (!json.ok) throw new Error(json.message || 'Failed to load MAL list');
-    malData = json.data;
 
-    loading.style.display = 'none';
-
-    const counts = { reading: 0, completed: 0, on_hold: 0, dropped: 0, plan_to_read: 0 };
-    Object.values(malData).forEach(entry => {
-      if (counts.hasOwnProperty(entry.status)) counts[entry.status]++;
+    // Push data + neutral filter state into Flask session
+    const setResp = await fetch('/api/mal/set_filter', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        data:    json.data,
+        filters: { reading: '', completed: '', on_hold: '', dropped: '', plan_to_read: '' },
+      }),
     });
+    if (!setResp.ok) throw new Error('Failed to save MAL session');
 
-    statusRow.innerHTML = Object.entries(MAL_STATUS_LABELS).map(([key, label]) => `
-      <div class="mal-status-item" data-status="${key}" data-state=""
-           onclick="toggleMalStatus('${key}',this)">
-        <span class="mal-status-icon" id="mal-icon-${key}">◦</span>
-        <span>${label}</span>
-        <span style="font-size:.6rem;opacity:.6">(${counts[key]})</span>
-      </div>
-    `).join('');
+    // Reload page 1 so server renders the panel with the loaded list
+    const url = new URL(window.location.href);
+    url.searchParams.delete('page');
+    window.location.href = url.toString();
 
   } catch(e) {
     loading.style.display  = 'none';
@@ -535,71 +594,65 @@ async function loadMalList() {
   }
 }
 
+// ── MAL list — toggle a status pill (DOM only, no reload) —————————
+// Cycles the pill state locally and marks it pending. Apply button
+// appears once any pill differs from its last-applied server state.
 function toggleMalStatus(status, el) {
   const states = ['', 'include', 'exclude'];
-  const current = malFilters[status];
-  const next    = states[(states.indexOf(current) + 1) % 3];
-  malFilters[status] = next;
-  el.dataset.state   = next;
+  const icons  = { '': '◦', 'include': '✓', 'exclude': '✕' };
+  const next   = states[(states.indexOf(el.dataset.state || '') + 1) % 3];
 
-  const icons = { '': '◦', 'include': '✓', 'exclude': '✕' };
-  document.getElementById('mal-icon-' + status).textContent = icons[next];
-  applyMalFilters();
+  el.dataset.state = next;
+  el.querySelector('.mal-status-icon').textContent = icons[next];
+  el.classList.toggle('pending', next !== (el.dataset.applied || ''));
+
+  const anyPending = [...document.querySelectorAll('.mal-status-item')]
+    .some(p => (p.dataset.state || '') !== (p.dataset.applied || ''));
+  document.getElementById('mal-apply-btn')?.classList.toggle('visible', anyPending);
 }
 
-function applyMalFilters() {
-  if (!malData) return;
+// ── MAL list — apply pending changes ————————————————————————
+async function applyMalFilters() {
+  const applyBtn = document.getElementById('mal-apply-btn');
+  if (applyBtn) applyBtn.classList.add('busy');
 
-  const includeStatuses = Object.entries(malFilters)
-    .filter(([,v]) => v === 'include').map(([k]) => k);
-  const excludeStatuses = Object.entries(malFilters)
-    .filter(([,v]) => v === 'exclude').map(([k]) => k);
-
-  const allNeutral = includeStatuses.length === 0 && excludeStatuses.length === 0;
-
-  const grid    = document.getElementById('results-grid');
-  const cards   = grid ? [...grid.querySelectorAll('.manga-card')] : [];
-  let visCount  = 0;
-
-  cards.forEach(card => {
-    if (allNeutral) {
-      card.classList.remove('mal-hidden', 'mal-dimmed');
-      visCount++;
-      return;
-    }
-
-    const mangaId   = parseInt(card.dataset.mangaId, 10);
-    const listEntry = malData[mangaId];
-    const userStatus = listEntry ? listEntry.status : null;
-
-    let hidden = false;
-
-    if (includeStatuses.length > 0) {
-      if (!userStatus || !includeStatuses.includes(userStatus)) hidden = true;
-    }
-    if (!hidden && excludeStatuses.includes(userStatus)) {
-      hidden = true;
-    }
-
-    card.classList.toggle('mal-hidden', hidden);
-    card.classList.remove('mal-dimmed');
-    if (!hidden) visCount++;
+  const filters = {};
+  document.querySelectorAll('.mal-status-item[data-status]').forEach(p => {
+    filters[p.dataset.status] = p.dataset.state || '';
   });
 
-  const countEl = document.getElementById('results-count');
-  if (countEl) {
-    const total = cards.length;
-    countEl.textContent = allNeutral
-      ? countEl.dataset.full
-      : `${visCount} of ${total} title${total !== 1 ? 's' : ''} shown`;
+  try {
+    const resp = await fetch('/api/mal/set_filter', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ filters }),
+    });
+    if (!resp.ok) throw new Error('Failed to save filter');
+    const url = new URL(window.location.href);
+    url.searchParams.delete('page');
+    window.location.href = url.toString();
+  } catch(e) {
+    if (applyBtn) applyBtn.classList.remove('busy');
+    console.error('MAL apply failed:', e);
   }
 }
 
-// Store the server-rendered count text so MAL filter can restore it
-(function() {
-  const el = document.getElementById('results-count');
-  if (el) el.dataset.full = el.textContent.trim();
-})();
+// ── MAL list — clear ————————————————————————————————————
+async function clearMalFilter() {
+  try {
+    await fetch('/api/mal/clear_filter', { method: 'POST' });
+    const url = new URL(window.location.href);
+    url.searchParams.delete('page');
+    window.location.href = url.toString();
+  } catch(e) {
+    console.error('MAL clear failed:', e);
+  }
+}
+
+// Snapshot the server-applied state on page load so pending detection works.
+document.querySelectorAll('.mal-status-item[data-status]').forEach(p => {
+  p.dataset.applied = p.dataset.state || '';
+});
 </script>
 </body>
 </html>

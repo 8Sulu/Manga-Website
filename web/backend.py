@@ -799,6 +799,45 @@ def api_mal_mangalist():
 
     return jsonify({'ok': True, 'data': all_statuses})
 
+@app.route('/api/mal/set_filter', methods=['POST'])
+def api_mal_set_filter():
+    """
+    Store the caller's MAL list data and/or active filter state in the Flask
+    session. Called by the results page after loading the list or toggling a
+    pill. Payload shape:
+        { data: {...},    filters: {reading: 'include'|'exclude'|'', ...} }
+    'data' is optional on subsequent toggle calls (filters-only update).
+    """
+    ip = _client_ip()
+    if _rate_limited(f'mal_filter:{ip}', limit=60, window=60):
+        return jsonify({'ok': False, 'message': 'Rate limited'}), 429
+ 
+    body        = request.get_json(silent=True) or {}
+    mal_data    = body.get('data')
+    mal_filters = body.get('filters')
+ 
+    if mal_filters is not None:
+        legal      = {'', 'include', 'exclude'}
+        valid_keys = {'reading', 'completed', 'on_hold', 'dropped', 'plan_to_read'}
+        sanitised  = {k: v for k, v in mal_filters.items()
+                      if k in valid_keys and v in legal}
+        session['mal_filters'] = sanitised
+ 
+    if mal_data is not None:
+        if not isinstance(mal_data, dict):
+            return jsonify({'ok': False, 'message': 'Invalid data payload'}), 400
+        session['mal_data'] = mal_data
+ 
+    return jsonify({'ok': True})
+ 
+ 
+@app.route('/api/mal/clear_filter', methods=['POST'])
+def api_mal_clear_filter():
+    """Remove MAL list and filter state from the Flask session."""
+    session.pop('mal_data',    None)
+    session.pop('mal_filters', None)
+    return jsonify({'ok': True})
+
 # ── Search ─────────────────────────────────────────────────────────────────────
 
 ON_SHELF = ('Graphic Novel', 'Youth Fiction', 'Adult Non-Fiction', 'Available',
@@ -967,6 +1006,20 @@ def search():
         if no_vol1 == '1' and not has_vol1:
             continue
 
+        _mal_data    = session.get('mal_data')
+        _mal_filters = session.get('mal_filters')
+        if _mal_data and _mal_filters:
+            include_statuses = [k for k, v in _mal_filters.items() if v == 'include']
+            exclude_statuses = [k for k, v in _mal_filters.items() if v == 'exclude']
+            if include_statuses or exclude_statuses:
+                manga_id_str = str(td['MangaID'])
+                entry        = _mal_data.get(manga_id_str) or _mal_data.get(td['MangaID'])
+                user_status  = entry.get('status', '') if entry else ''
+                if include_statuses and user_status not in include_statuses:
+                    continue
+                if user_status in exclude_statuses:
+                    continue
+
         manga_type = td.get('Type', '')
         author     = td.get('author', '')
         title_str  = td['Title']
@@ -994,7 +1047,7 @@ def search():
 
     # Pagination handling
     page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 48, type=int)
+    per_page = request.args.get('per_page', 50, type=int)
     
     total_count = len(grouped)
     total_pages = max(1, (total_count + per_page - 1) // per_page)
@@ -1018,7 +1071,11 @@ def search():
         has_filters=any(v for k, v in filters.items()),
         LCPL_LIBRARY_ID=LCPL_LIBRARY_ID,
         BROWARD_LIBRARY_ID=BROWARD_LIBRARY_ID,
-    )
+        mal_filters=session.get('mal_filters', {}),
+        mal_active=bool(session.get('mal_filters') and
+                         any(v for v in session.get('mal_filters', {}).values())),
+        mal_loaded=bool(session.get('mal_data')),
+     )
 
 # ── Jinja2 filters ─────────────────────────────────────────────────────────────
 
