@@ -69,21 +69,35 @@
     .ta-score { font-family: var(--mono); font-size: .7rem; color: var(--green); flex-shrink: 0; min-width: 28px; text-align: right; }
     .ta-empty { padding: 14px 16px; font-family: var(--mono); font-size: .75rem; color: var(--text3); text-align: center; }
 
-    /* ── Filter row ──────────────────────────────────────── */
+    /* ── Filter strip ────────────────────────────────────── */
+    /* FIX 2: selects are inline pill-shaped, not full-width blocks */
     .filter-strip {
       display: flex; flex-direction: column; gap: .75rem; margin-top: 1rem;
       width: 100%; max-width: 600px;
     }
-    .filter-selects { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+    .filter-selects { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
     .filter-select {
-      padding: 6px 12px; font-family: var(--mono); font-size: .72rem;
+      /* fit-content width — no longer stretches full row */
+      width: auto;
+      padding: 5px 14px; font-family: var(--mono); font-size: .68rem;
       background: var(--bg3); border: 1px solid var(--border2); border-radius: 99px;
-      color: var(--text2); cursor: pointer; outline: none; transition: border-color .15s, color .15s;
+      color: var(--text2); cursor: pointer; outline: none;
+      transition: border-color .15s, color .15s, box-shadow .15s;
       -webkit-appearance: none;
+      /* subtle dropdown arrow via background image */
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%2344445a'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+      padding-right: 26px;
     }
-    .filter-select:focus { border-color: var(--purple); color: var(--text); }
+    .filter-select:focus {
+      border-color: var(--purple); color: var(--text);
+      box-shadow: 0 0 0 3px var(--purple-bg);
+    }
+    .filter-select option { background: var(--bg3); }
 
     /* ── Pill row ────────────────────────────────────────── */
+    /* FIX 7: dividers are CSS-based so they don't orphan on mobile wrap */
     .pill-row { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
     .pill-btn {
       font-family: var(--mono); font-size: .68rem; padding: 5px 14px; border-radius: 99px;
@@ -97,7 +111,15 @@
     .pill-btn.pill-lcpl.active     { background: var(--green-bg);  border-color: var(--green-brd);  color: var(--green); }
     .pill-btn.pill-broward.active  { background: var(--amber-bg);  border-color: var(--amber-brd);  color: var(--amber); }
     .pill-btn.pill-vol1.active     { background: var(--green-bg);  border-color: var(--green-brd);  color: var(--green); }
-    .pill-divider { font-family: var(--mono); font-size: .6rem; color: var(--text3); display: flex; align-items: center; padding: 0 2px; opacity: .4; }
+
+    /* Pill group divider — CSS pseudo-element so it never wraps onto its own line */
+    .pill-group-sep {
+      display: flex; align-items: center;
+      font-family: var(--mono); font-size: .6rem; color: var(--text3);
+      opacity: .35; user-select: none; pointer-events: none;
+      /* Hide on very narrow viewports where wrap is unavoidable */
+    }
+    @media (max-width: 360px) { .pill-group-sep { display: none; } }
 
     /* ── About card ──────────────────────────────────────── */
     .about-card { max-width: 680px; margin: 2.5rem auto 0; }
@@ -147,6 +169,7 @@
       </div>
 
       <div class="filter-strip">
+        <!-- FIX 2: pill-shaped fit-content selects, inline with each other -->
         <div class="filter-selects">
           <select class="filter-select" id="sel-type"
                   onchange="document.getElementById('f-type').value=this.value">
@@ -210,22 +233,23 @@
           </select>
         </div>
 
+        <!-- FIX 7: CSS divider spans replace the old | text spans -->
         <div class="pill-row" id="filter-pills">
-          <!-- Availability -->
+          <!-- Availability group -->
           <a class="pill-btn pill-all active" href="#" data-group="avail" data-val="">Any status</a>
           <a class="pill-btn pill-avail"      href="#" data-group="avail" data-val="available">🟢 Available now</a>
           <a class="pill-btn pill-out"        href="#" data-group="avail" data-val="out">🔴 Checked out</a>
 
-          <span class="pill-divider">|</span>
+          <span class="pill-group-sep" aria-hidden="true">|</span>
 
-          <!-- Library -->
+          <!-- Library group -->
           <a class="pill-btn pill-all active"  href="#" data-group="library" data-val="">Both libraries</a>
           <a class="pill-btn pill-lcpl"         href="#" data-group="library" data-val="{{ LCPL_LIBRARY_ID }}">🟢 Leon County</a>
           <a class="pill-btn pill-broward"      href="#" data-group="library" data-val="{{ BROWARD_LIBRARY_ID }}">🟡 Broward</a>
 
-          <span class="pill-divider">|</span>
+          <span class="pill-group-sep" aria-hidden="true">|</span>
 
-          <!-- Has vol. 1 toggle -->
+          <!-- Vol 1 toggle -->
           <a class="pill-btn pill-vol1" href="#" data-group="no_vol1" data-val="1"
              title="Only show titles where volume 1 is in the library">📚 Has vol. 1</a>
         </div>

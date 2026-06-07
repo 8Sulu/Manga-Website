@@ -244,7 +244,7 @@ def get_search_results(session: requests.Session, title: str, author: str,
 
     while True:
         params: list[tuple[str, str]] = [
-            ("qu",  f"TITLE={title}"),
+            ("qu",  f'TITLE="{title}"'),
             ("qu",  f"AUTHOR={author}"),
             ("qf",  "FORMAT\tSpecial Format\tBOOK\tBooks"),
             ("h",   "1"),

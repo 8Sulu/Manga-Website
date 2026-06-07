@@ -81,6 +81,47 @@
     }
     .last-scraped-hint b { color: var(--text2); font-weight: 400; }
     .last-scraped-hint .stale { color: var(--amber); }
+
+    /* ── FIX 3: Branch stats with inline bar chart ────────── */
+    /* Single-column list so the bar has full row width to work with */
+    .branch-mini { display: flex; flex-direction: column; gap: 4px; }
+
+    .branch-row-mini {
+      display: flex; align-items: center; gap: 8px;
+      padding: 5px 8px; border-radius: var(--r);
+      border: 1px solid var(--border);
+      /* Bar chart: a gradient that fills left-to-right proportional to count.
+         The --bar-pct custom property is set inline per row by Jinja. */
+      background: linear-gradient(
+        90deg,
+        var(--bar-color, rgba(57,232,138,0.08)) 0%,
+        var(--bar-color, rgba(57,232,138,0.08)) var(--bar-pct, 0%),
+        var(--bg3) var(--bar-pct, 0%),
+        var(--bg3) 100%
+      );
+      transition: background .3s;
+    }
+    .branch-row-mini.broward {
+      --bar-color: rgba(255,187,56,0.10);
+    }
+    .branch-row-mini:not(.broward) {
+      --bar-color: rgba(57,232,138,0.10);
+    }
+
+    .branch-name-mini {
+      font-family: var(--mono); font-size: .65rem; color: var(--text2);
+      flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .branch-count-mini {
+      font-family: var(--mono); font-size: .65rem; color: var(--green); flex-shrink: 0;
+    }
+    .branch-row-mini.broward .branch-count-mini { color: var(--amber); }
+
+    /* Library group label sits above its rows */
+    .branch-lib-label {
+      font-family: var(--mono); font-size: .58rem; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--text3); margin: .5rem 0 .2rem;
+    }
   </style>
 </head>
 <body>
@@ -280,25 +321,81 @@
     <div>
       <div class="section-label">Collection by location</div>
       {% if manga_per_library %}
+      {#
+        Compute the max VolumeCount *per library group* so the top branch in
+        each library always renders at 100% width, independent of the other
+        library's scale.
+
+        Strategy: during the render loop we track the current group's max in
+        a namespace. When we enter a new library group we reset it.  The
+        first row of each group is always the highest (the SQL query orders
+        by VolumeCount DESC within each library), so ns.group_max is correct
+        immediately and stays correct for all subsequent rows in that group.
+      #}
       <div class="branch-mini">
-        {% set ns = namespace(last_lib='') %}
+        {% set ns = namespace(last_lib='', group_max=1) %}
         {% for row in manga_per_library %}
-          {% if row.LibraryName != ns.last_lib %}
-            <div class="branch-lib-label">{{ row.LibraryName }}</div>
-            {% set ns.last_lib = row.LibraryName %}
-          {% endif %}
           {% set is_broward = 'Broward' in row.LibraryName %}
-          <div class="branch-row-mini {{ 'broward' if is_broward }}">
+
+          {% if row.LibraryName != ns.last_lib %}
+            {# New library group — first row is always the highest count #}
+            <div class="branch-lib-label">{{ row.LibraryName }}</div>
+            {% set ns.last_lib  = row.LibraryName %}
+            {% set ns.group_max = row.VolumeCount if row.VolumeCount > 0 else 1 %}
+          {% endif %}
+
+          {% set bar_pct = ((row.VolumeCount / ns.group_max) * 100) | int %}
+
+          <div class="branch-row-mini {{ 'broward' if is_broward }}"
+               style="--bar-pct: {{ bar_pct }}%">
             <span class="branch-name-mini" title="{{ row.BranchName }}">
+              {# LCPL branches #}
               {% if   'Northeast' in row.BranchName %}NE Branch
-              {% elif 'Leroy'     in row.BranchName or 'Main' in row.BranchName %}Main
+              {% elif 'Leroy'     in row.BranchName or ('Main' in row.BranchName and not is_broward) %}Main
               {% elif 'Jackson'   in row.BranchName %}Lk Jackson
               {% elif 'Perry'     in row.BranchName %}BL Perry
               {% elif 'Braden'    in row.BranchName %}Ft Braden
               {% elif 'Eastside'  in row.BranchName %}Eastside
               {% elif 'Woodville' in row.BranchName %}Woodville
-              {% elif 'Broward'   in row.BranchName %}All Branches
-              {% else %}{{ row.BranchName.split(' ')[0] }}{% endif %}
+              {# Broward branches — specific matches, no catch-all on "Broward" #}
+              {% elif 'Northwest Regional' in row.BranchName %}NW Regional
+              {% elif 'North Regional'     in row.BranchName %}N Regional
+              {% elif 'South Regional'     in row.BranchName %}S Regional
+              {% elif 'Southwest Regional' in row.BranchName %}SW Regional
+              {% elif 'West Regional'      in row.BranchName %}W Regional
+              {% elif 'Main Library'       in row.BranchName %}Main
+              {% elif 'African'            in row.BranchName %}AARLCC
+              {% elif 'Hollywood Beach'    in row.BranchName %}Hollywood Bch
+              {% elif 'Hollywood'          in row.BranchName %}Hollywood
+              {% elif 'Lauderhill Central' in row.BranchName %}Lauderhill CP
+              {% elif 'Lauderhill Towne'   in row.BranchName %}Lauderhill TC
+              {% elif 'Lauderdale Lakes'   in row.BranchName %}Laud. Lakes
+              {% elif 'Pompano'            in row.BranchName %}Pompano Bch
+              {% elif 'Pembroke Pines'     in row.BranchName %}Pemb. Pines
+              {% elif 'Miramar'            in row.BranchName %}Miramar
+              {% elif 'Weston'             in row.BranchName %}Weston
+              {% elif 'Tamarac'            in row.BranchName %}Tamarac
+              {% elif 'Sunrise'            in row.BranchName %}Sunrise
+              {% elif 'Margate'            in row.BranchName %}Margate
+              {% elif 'Deerfield'          in row.BranchName %}Deerfield Bch
+              {% elif 'Dania'              in row.BranchName %}Dania Bch
+              {% elif 'Hallandale'         in row.BranchName %}Hallandale
+              {% elif 'Carver'             in row.BranchName %}Carver Ranch
+              {% elif 'Century'            in row.BranchName %}Century Plz
+              {% elif 'North Lauderdale'   in row.BranchName %}N. Laud.
+              {% elif 'Imperial'           in row.BranchName %}Imperial Pt
+              {% elif 'Riverland'          in row.BranchName %}Riverland
+              {% elif 'Davie'              in row.BranchName %}Davie/CC
+              {% elif 'Beach Branch'       in row.BranchName %}Beach
+              {% elif 'Jan Moran'          in row.BranchName %}Jan Moran
+              {% elif 'Galt'               in row.BranchName %}Galt Ocean
+              {% elif 'Fort Lauderdale Reading' in row.BranchName %}FTL Reading
+              {% elif 'Tyrone'             in row.BranchName %}Tyrone Bryant
+              {% elif 'Northwest Branch'   in row.BranchName %}NW Branch
+              {% elif 'Nova'               in row.BranchName %}NSU Library
+              {% elif 'Young at Art'       in row.BranchName or 'formerly' in row.BranchName %}Young at Art
+              {% elif 'Stirling'           in row.BranchName %}Stirling Rd
+              {% else %}{{ row.BranchName | truncate(16, True, '…') }}{% endif %}
             </span>
             <span class="branch-count-mini">{{ row.VolumeCount }}</span>
           </div>
@@ -515,8 +612,6 @@ async function doReset() {
 }
 
 // ── Clear title availability ───────────────────────────────────
-// _lastClearedMangaID is populated from the server response (d.manga_id)
-// so it is always a real DB ID, never an undefined variable.
 let _lastClearedTitle   = null;
 let _lastClearedMangaID = null;
 
@@ -547,7 +642,7 @@ async function deleteTitleResultsConfirmed() {
 
     if (d.ok) {
       _lastClearedTitle   = title;
-      _lastClearedMangaID = d.manga_id;   // server resolves title → ID and returns it
+      _lastClearedMangaID = d.manga_id;
       document.getElementById('del-results-title-saved').textContent = title;
       undoEl.classList.add('visible');
       loadStats();

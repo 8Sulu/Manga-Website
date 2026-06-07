@@ -16,15 +16,14 @@ ADMIN_PASSWORD   = os.getenv('ADMIN_PASSWORD', '')
 JOB_HISTORY_PATH = DATA_DIR / "job_history.json"
 
 # ── Server-side session (filesystem) ──────────────────────────────────────────
-# Keeps large payloads (MAL list) off the cookie, which has a 4 KB limit.
 _SESSION_DIR = DATA_DIR / "flask_sessions"
 _SESSION_DIR.mkdir(parents=True, exist_ok=True)
 app.config.update(
     SESSION_TYPE             = "filesystem",
     SESSION_FILE_DIR         = str(_SESSION_DIR),
-    SESSION_FILE_THRESHOLD   = 500,          # max files before oldest are purged
+    SESSION_FILE_THRESHOLD   = 500,
     SESSION_PERMANENT        = False,
-    SESSION_USE_SIGNER       = True,         # HMAC-signs the session ID cookie
+    SESSION_USE_SIGNER       = True,
     SESSION_COOKIE_SECURE    = True,
     SESSION_COOKIE_HTTPONLY  = True,
     SESSION_COOKIE_SAMESITE  = "Lax",
@@ -41,18 +40,16 @@ def set_security_headers(response):
     response.headers['X-XSS-Protection']        = '1; mode=block'
     response.headers['Referrer-Policy']         = 'strict-origin-when-cross-origin'
     response.headers['Permissions-Policy']      = 'geolocation=(), microphone=(), camera=()'
-    # Only set HSTS when served over HTTPS (nginx handles TLS)
     if request.is_secure or request.headers.get('X-Forwarded-Proto') == 'https':
         response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
     return response
 
 # ── Simple in-memory rate limiter ─────────────────────────────────────────────
 
-_rate_limits: dict = {}          # ip -> [timestamp, ...]
+_rate_limits: dict = {}
 _rate_lock = threading.Lock()
 
 def _rate_limited(key: str, limit: int = 60, window: int = 60) -> bool:
-    """Return True if this key has exceeded limit requests in the last window seconds."""
     now = time.time()
     with _rate_lock:
         hits = _rate_limits.get(key, [])
@@ -69,7 +66,7 @@ def _client_ip() -> str:
            request.headers.get('X-Forwarded-For', '').split(',')[0].strip() or \
            request.remote_addr or 'unknown'
 
-# ── CSRF protection (token in session, checked on state-changing POSTs) ────────
+# ── CSRF protection ────────────────────────────────────────────────────────────
 
 def _csrf_token() -> str:
     if 'csrf_token' not in session:
@@ -97,7 +94,6 @@ def admin_required(f):
     def decorated(*args, **kwargs):
         if session.get('admin'):
             return f(*args, **kwargs)
-        # Allow passwordless local access only if no password is set
         if not ADMIN_PASSWORD and request.remote_addr in ('127.0.0.1', '::1'):
             return f(*args, **kwargs)
         if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
@@ -119,8 +115,20 @@ def _run_subprocess(job_name: str, cmd: list) -> None:
         cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, bufsize=1
     )
-    last_msg = ''
-    progress  = 0
+    last_msg    = ''   # most recent line, shown live in the UI
+    history_msg = ''   # last *meaningful* result line, stored in job history
+    progress    = 0
+    stopped     = False
+
+    # Lines matching these patterns are worth storing in history
+    _RESULT_RE = re.compile(
+        r'inserted|updated|done|complete|stopped|failed|error|no books|no new|'
+        r'All runs|✓|✗|\[\*\]|\[-\]|\[\+\]',
+        re.IGNORECASE,
+    )
+    # Raw logging-module output — skip for history (looks like "2026-06-03 02:27:18,175 INFO ...")
+    _LOG_PREFIX_RE = re.compile(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}')
+
     for line in proc.stdout:
         line = line.rstrip()
         if not line:
@@ -130,21 +138,37 @@ def _run_subprocess(job_name: str, cmd: list) -> None:
         if m:
             n, total = int(m.group(1)), int(m.group(2))
             progress = int(n / total * 100) if total else 0
+        # Promote to history_msg only if it looks like a result, not a raw log line
+        if _RESULT_RE.search(line) and not _LOG_PREFIX_RE.match(line):
+            history_msg = line[:200]
         with _jobs_lock:
             if not _jobs[job_name].get('stop_requested'):
                 _jobs[job_name].update(progress=progress, message=last_msg)
             else:
                 proc.terminate()
+                stopped = True
                 break
+
     proc.wait()
     ok = proc.returncode == 0
+
+    if stopped:
+        final_display = 'stopped'
+        history_msg   = 'stopped'
+    else:
+        final_display = last_msg if ok else f'error: exited {proc.returncode}'
+
+    # Fall back gracefully if no result line was captured
+    if not history_msg:
+        history_msg = last_msg or ('done' if ok else f'exited {proc.returncode}')
+
     with _jobs_lock:
         _jobs[job_name].update(
             running=False,
             progress=100 if ok else progress,
-            message=last_msg if ok else f'error: exited {proc.returncode}',
+            message=final_display,
         )
-    _append_job_history(job_name, 'done' if ok else 'error', last_msg)
+    _append_job_history(job_name, 'done' if ok else 'error', history_msg)
 
 def _start_job(job_name: str, cmd: list) -> tuple[bool, int, str]:
     with _jobs_lock:
@@ -348,13 +372,11 @@ def _broward_search_url(title: str, author: str, manga_type: str = '',
 def _lcpl_search_url(title: str, author: str, manga_type: str = '', volume: int | None = None) -> str:
     et = _quote_plus(title)
     ea = _quote_plus(author or '')
-    
     _type_lower = (manga_type or '').lower().replace(' ', '-')
     if _type_lower in ('light novel', 'light-novel', 'novel'):
         url = f"https://lcpl.ent.sirsi.net/client/en_US/lcpl/search/results?qu=&qu=TITLE%3D{et}&qu=AUTHOR%3D{ea}&qu=-SUBJECT%3DComic&te=ILS&lm=BOOKS"
     else:
         url = f"https://lcpl.ent.sirsi.net/client/en_US/lcpl/search/results?qu=&qu=TITLE%3D{et}&qu=AUTHOR%3D{ea}&te=ILS&lm=BOOKS"
-        
     if volume is not None and volume > 0:
         url += f"&qu={volume}"
     return url
@@ -517,7 +539,7 @@ def _start_scrape_job(action: str):
     is_broward  = action == 'scrape_broward'
     script      = 'broward_scrapper.py' if is_broward else 'scrapper.py'
     lib_pattern = '%Broward%' if is_broward else '%Leon%'
-    
+
     range_str   = request.form.get('range', '').strip()
     manga_id    = request.form.get('manga_id', '').strip()
     only_new    = request.form.get('only_new') == '1'
@@ -526,12 +548,12 @@ def _start_scrape_job(action: str):
 
     if manga_id:
         cmd.extend(['--manga-ids', manga_id])
-        
+
     elif only_new:
         missing_ids = _missing_manga_ids(lib_pattern)
         if not missing_ids:
             return jsonify({'ok': False, 'message': f'All titles already have {"Broward" if is_broward else "LCPL"} data'}), 400
-            
+
         if range_str:
             lo, hi = parse_range_str(range_str, _titles_count())
             all_ids = [r['MangaID'] for r in execute_query("SELECT MangaID FROM manga ORDER BY MangaID")]
@@ -539,9 +561,9 @@ def _start_scrape_job(action: str):
             missing_ids = [m for m in missing_ids if m in valid_ids]
             if not missing_ids:
                 return jsonify({'ok': False, 'message': f'No new titles in range {range_str}'}), 400
-                
+
         cmd.extend(['--manga-ids', ','.join(map(str, missing_ids))])
-        
+
     elif range_str:
         lo, hi = parse_range_str(range_str, _titles_count())
         cmd.extend(['--range', f'{lo}-{hi}'])
@@ -689,10 +711,10 @@ def api_delete_title_results():
     data     = request.get_json() or {}
     manga_id = data.get('manga_id')
     lib_id   = data.get('library')
-    
+
     if not manga_id:
         return jsonify({'ok': False, 'message': 'No manga_id provided'}), 400
-        
+
     try:
         if lib_id:
             execute_update("""
@@ -709,7 +731,7 @@ def api_delete_title_results():
             """, (manga_id,))
         else:
             execute_update('DELETE FROM availability WHERE MangaID = %s', (manga_id,))
-            
+
         return jsonify({'ok': True, 'message': f'Cleared availability for ID: {manga_id}'})
     except Exception as e:
         return jsonify({'ok': False, 'message': str(e)}), 500
@@ -801,26 +823,26 @@ def api_mal_set_filter():
     ip = _client_ip()
     if _rate_limited(f'mal_filter:{ip}', limit=60, window=60):
         return jsonify({'ok': False, 'message': 'Rate limited'}), 429
- 
+
     body        = request.get_json(silent=True) or {}
     mal_data    = body.get('data')
     mal_filters = body.get('filters')
- 
+
     if mal_filters is not None:
         legal      = {'', 'include', 'exclude'}
         valid_keys = {'reading', 'completed', 'on_hold', 'dropped', 'plan_to_read'}
         sanitised  = {k: v for k, v in mal_filters.items()
                       if k in valid_keys and v in legal}
         session['mal_filters'] = sanitised
- 
+
     if mal_data is not None:
         if not isinstance(mal_data, dict):
             return jsonify({'ok': False, 'message': 'Invalid data payload'}), 400
         session['mal_data'] = mal_data
- 
+
     return jsonify({'ok': True})
- 
- 
+
+
 @app.route('/api/mal/clear_filter', methods=['POST'])
 def api_mal_clear_filter():
     session.pop('mal_data',    None)
@@ -1032,7 +1054,7 @@ def search():
 
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 50, type=int)
-    
+
     total_count = len(grouped)
     total_pages = max(1, (total_count + per_page - 1) // per_page)
     page = max(1, min(page, total_pages))

@@ -928,5 +928,47 @@
     "status": "done",
     "message": "[*] Done.",
     "at": "2026-06-03T10:24:56.488313+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "error",
+    "message": "Search page 1: 6 catalog keys",
+    "at": "2026-06-07T02:57:17.130597+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "error",
+    "message": "stopped",
+    "at": "2026-06-07T03:08:49.894273+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "error",
+    "message": "stopped",
+    "at": "2026-06-07T07:58:00.327191+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "error",
+    "message": "stopped",
+    "at": "2026-06-07T07:58:13.521212+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "error",
+    "message": "stopped",
+    "at": "2026-06-07T07:58:36.236548+00:00"
+  },
+  {
+    "job": "get_manga",
+    "status": "done",
+    "message": "All runs complete.",
+    "at": "2026-06-07T09:30:30.570391+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-07T09:31:26.289451+00:00"
   }
 ]

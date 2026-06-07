@@ -17,15 +17,33 @@
 
     /* ── Volume grid ────────────────────────────────────────── */
     .vol-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px,1fr)); gap: 5px; }
+
+    /* FIX 1: vol-chip gets a colored left border based on best status.
+       The chip background also gets a very subtle tint for scanability. */
     .vol-chip {
       background: var(--bg4); border: 1px solid var(--border); border-radius: var(--r);
       padding: .35rem .55rem; font-family: var(--mono); font-size: .62rem;
       transition: border-color .12s, background .12s;
+      /* left border is the status indicator — overridden per status below */
+      border-left: 3px solid var(--border2);
     }
+    /* Status-colored left border variants */
+    .vol-chip.vol-status-avail {
+      border-left-color: var(--green);
+      background: color-mix(in srgb, var(--green-bg) 60%, var(--bg4));
+    }
+    .vol-chip.vol-status-hold {
+      border-left-color: var(--amber);
+      background: color-mix(in srgb, var(--amber-bg) 60%, var(--bg4));
+    }
+    .vol-chip.vol-status-out {
+      border-left-color: var(--red);
+    }
+
     a.vol-chip {
       display: block; text-decoration: none; color: inherit; cursor: pointer;
     }
-    a.vol-chip:hover { border-color: var(--purple-brd); background: var(--purple-bg); }
+    a.vol-chip:hover { border-color: var(--purple-brd); background: var(--purple-bg); border-left-color: var(--purple); }
     a.vol-chip:hover .vol-chip-num { color: var(--purple); }
     .vol-chip-num { color: var(--text3); margin-bottom: 3px; font-size: .58rem; transition: color .12s; }
     .vol-chip-branches { display: flex; flex-direction: column; gap: 2px; }
@@ -49,30 +67,37 @@
     .status-hold  { color: var(--amber); }
     .status-out   { color: var(--red); }
 
-    /* ── MAL status filter ──────────────────────────────────── */
+    /* ── MAL filter panel — FIX 5: collapsible ──────────────── */
     .mal-panel {
       background: var(--bg2); border: 1px solid var(--border);
-      border-radius: var(--r-lg); padding: 1rem 1.25rem; margin-bottom: 1.25rem;
+      border-radius: var(--r-lg); margin-bottom: 1.25rem;
+      overflow: hidden;
     }
-    .mal-header { display: flex; align-items: center; gap: .75rem; margin-bottom: .85rem; flex-wrap: wrap; }
-    .mal-title  { font-family: var(--mono); font-size: .65rem; letter-spacing: .12em; text-transform: uppercase; color: var(--text2); }
-    .mal-status-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-    .mal-status-item {
-      display: flex; align-items: center; gap: 6px;
-      font-family: var(--mono); font-size: .68rem; color: var(--text2);
-      padding: 4px 10px; border-radius: 99px;
-      border: 1px solid var(--border2); background: var(--bg3); cursor: pointer;
-      user-select: none; transition: all .12s;
+    /* Toggle row — always visible */
+    .mal-toggle-row {
+      display: flex; align-items: center; gap: .75rem; padding: .75rem 1.25rem;
+      cursor: pointer; user-select: none;
+      transition: background .12s;
     }
-    .mal-status-item:hover { border-color: var(--border3); }
-    .mal-status-item[data-state="include"] {
-      background: var(--green-bg); border-color: var(--green-brd); color: var(--green);
+    .mal-toggle-row:hover { background: var(--bg3); }
+    .mal-title  { font-family: var(--mono); font-size: .65rem; letter-spacing: .12em; text-transform: uppercase; color: var(--text2); flex: 1; }
+    .mal-chevron {
+      font-family: var(--mono); font-size: .65rem; color: var(--text3);
+      transition: transform .2s; display: inline-block;
     }
-    .mal-status-item[data-state="exclude"] {
-      background: var(--red-bg); border-color: var(--red-brd); color: var(--red);
+    .mal-panel.open .mal-chevron { transform: rotate(90deg); }
+    .mal-active-badge {
+      font-family: var(--mono); font-size: .58rem; padding: 2px 7px;
+      border-radius: 99px; background: var(--amber-bg); border: 1px solid var(--amber-brd);
+      color: var(--amber);
     }
-    .mal-status-item.mal-busy { opacity: .55; pointer-events: none; }
-    .mal-status-icon { font-size: .75rem; min-width: .85rem; text-align: center; }
+    /* Collapsible body */
+    .mal-body {
+      display: none; padding: 0 1.25rem 1rem; border-top: 1px solid var(--border);
+    }
+    .mal-panel.open .mal-body { display: block; }
+
+    .mal-header { display: flex; align-items: center; gap: .75rem; margin-bottom: .85rem; flex-wrap: wrap; padding-top: .85rem; }
     .mal-loading { font-family: var(--mono); font-size: .68rem; color: var(--text3); }
     .mal-error   { font-family: var(--mono); font-size: .68rem; color: var(--amber); }
     .mal-load-btn {
@@ -97,7 +122,24 @@
     .mal-apply-btn:hover { box-shadow: 0 4px 20px rgba(157,125,255,.45); transform: translateY(-1px); }
     .mal-apply-btn.visible { display: inline-flex; align-items: center; gap: 5px; }
     .mal-apply-btn.busy { opacity: .55; pointer-events: none; transform: none !important; }
+
+    .mal-status-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .mal-status-item {
+      display: flex; align-items: center; gap: 6px;
+      font-family: var(--mono); font-size: .68rem; color: var(--text2);
+      padding: 4px 10px; border-radius: 99px;
+      border: 1px solid var(--border2); background: var(--bg3); cursor: pointer;
+      user-select: none; transition: all .12s;
+    }
+    .mal-status-item:hover { border-color: var(--border3); }
+    .mal-status-item[data-state="include"] {
+      background: var(--green-bg); border-color: var(--green-brd); color: var(--green);
+    }
+    .mal-status-item[data-state="exclude"] {
+      background: var(--red-bg); border-color: var(--red-brd); color: var(--red);
+    }
     .mal-status-item.pending { outline: 2px solid var(--purple-brd); outline-offset: 2px; }
+    .mal-status-icon { font-size: .75rem; min-width: .85rem; text-align: center; }
 
     /* ── Pagination ──────────────────────────────────────────── */
     .pagination-row {
@@ -135,53 +177,66 @@
     <span class="hero-eyebrow" style="margin:0">Search results</span>
   </header>
 
-  <!-- ── MAL status filter panel ──────────────────────────────── -->
-  <div class="mal-panel" id="mal-panel">
-    <div class="mal-header">
+  <!-- ── MAL status filter panel — FIX 5: collapsible toggle ──── -->
+  <div class="mal-panel {{ 'open' if mal_loaded }}" id="mal-panel">
+    <!-- Always-visible header row -->
+    <div class="mal-toggle-row" onclick="toggleMalPanel()">
       <span class="mal-title">Filter by MAL list</span>
-      <span class="mal-loading" id="mal-loading" style="display:none">Loading…</span>
-      <span class="mal-error"   id="mal-error"   style="display:none"></span>
-      {% if not mal_loaded %}
-      <button class="mal-load-btn" id="mal-load-btn" onclick="loadMalList()">Load my MAL list</button>
-      {% else %}
-      <button class="mal-apply-btn" id="mal-apply-btn" onclick="applyMalFilters()">Apply</button>
-      <button class="mal-clear-btn" onclick="clearMalFilter()" title="Clear MAL filter and list">✕ Clear</button>
+      {% if mal_active %}
+      <span class="mal-active-badge">⚠ filter active</span>
       {% endif %}
+      {% if not mal_loaded %}
+      <span style="font-family:var(--mono);font-size:.62rem;color:var(--text3)">Load to filter results</span>
+      {% endif %}
+      <span class="mal-chevron">▶</span>
     </div>
 
-    {% if mal_loaded %}
-    {# Server-rendered pills — states come from the Flask session #}
-    <div class="mal-status-row" id="mal-status-row">
-      {% set icons = {'include': '✓', 'exclude': '✕', '': '◦'} %}
-      {% for key, label in [('reading','Reading'),('completed','Completed'),('on_hold','On Hold'),('dropped','Dropped'),('plan_to_read','Plan to Read')] %}
-      {% set state = mal_filters.get(key, '') %}
-      <div class="mal-status-item" data-status="{{ key }}" data-state="{{ state }}"
-           onclick="toggleMalStatus('{{ key }}', this)">
-        <span class="mal-status-icon">{{ icons.get(state, '◦') }}</span>
-        <span>{{ label }}</span>
+    <!-- Collapsible body -->
+    <div class="mal-body">
+      <div class="mal-header">
+        <span class="mal-loading" id="mal-loading" style="display:none">Loading…</span>
+        <span class="mal-error"   id="mal-error"   style="display:none"></span>
+        {% if not mal_loaded %}
+        <button class="mal-load-btn" id="mal-load-btn" onclick="loadMalList()">Load my MAL list</button>
+        {% else %}
+        <button class="mal-apply-btn" id="mal-apply-btn" onclick="applyMalFilters()">Apply</button>
+        <button class="mal-clear-btn" onclick="clearMalFilter()" title="Clear MAL filter and list">✕ Clear</button>
+        {% endif %}
       </div>
-      {% endfor %}
-    </div>
-    <div style="font-family:var(--mono);font-size:.62rem;color:var(--text3);margin-top:.6rem">
-      Click once to <span style="color:var(--green)">✓ include only</span>,
-      twice to <span style="color:var(--red)">✕ exclude</span>,
-      three times to reset · hit <b style="color:var(--text2)">Apply</b> to filter results.
-      {% if mal_active %}
-      <span style="color:var(--amber);margin-left:.5rem">⚠ Filter active — pagination reflects filtered results</span>
+
+      {% if mal_loaded %}
+      <div class="mal-status-row" id="mal-status-row">
+        {% set icons = {'include': '✓', 'exclude': '✕', '': '◦'} %}
+        {% for key, label in [('reading','Reading'),('completed','Completed'),('on_hold','On Hold'),('dropped','Dropped'),('plan_to_read','Plan to Read')] %}
+        {% set state = mal_filters.get(key, '') %}
+        <div class="mal-status-item" data-status="{{ key }}" data-state="{{ state }}"
+             onclick="toggleMalStatus('{{ key }}', this)">
+          <span class="mal-status-icon">{{ icons.get(state, '◦') }}</span>
+          <span>{{ label }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      <div style="font-family:var(--mono);font-size:.62rem;color:var(--text3);margin-top:.6rem">
+        Click once to <span style="color:var(--green)">✓ include only</span>,
+        twice to <span style="color:var(--red)">✕ exclude</span>,
+        three times to reset · hit <b style="color:var(--text2)">Apply</b> to filter.
+        {% if mal_active %}
+        <span style="color:var(--amber);margin-left:.5rem">⚠ Filter active</span>
+        {% endif %}
+      </div>
+      {% else %}
+      <div class="mal-status-row" id="mal-status-row">
+        <span style="font-family:var(--mono);font-size:.68rem;color:var(--text3)">
+          Click "Load my MAL list" to filter results by your reading status.
+        </span>
+      </div>
+      <div style="font-family:var(--mono);font-size:.62rem;color:var(--text3);margin-top:.6rem">
+        Click once to <span style="color:var(--green)">✓ include only</span>,
+        twice to <span style="color:var(--red)">✕ exclude</span>,
+        three times to reset.
+      </div>
       {% endif %}
     </div>
-    {% else %}
-    <div class="mal-status-row" id="mal-status-row">
-      <span style="font-family:var(--mono);font-size:.68rem;color:var(--text3)">
-        Click "Load my MAL list" to filter results by your reading status.
-      </span>
-    </div>
-    <div style="font-family:var(--mono);font-size:.62rem;color:var(--text3);margin-top:.6rem">
-      Click once to <span style="color:var(--green)">✓ include only</span>,
-      twice to <span style="color:var(--red)">✕ exclude</span>,
-      three times to reset.
-    </div>
-    {% endif %}
   </div>
 
   <!-- ── Results bar ───────────────────────────────────────────── -->
@@ -203,7 +258,6 @@
 
   <!-- ── Top pagination ────────────────────────────────────────── -->
   {% if total_pages > 1 %}
-  {# base_qs reused by the bottom pagination block #}
   {% set base_qs %}{% for k, v in request.args.items() %}{% if k != 'page' %}&{{ k }}={{ v | urlencode }}{% endif %}{% endfor %}{% endset %}
   <div class="pagination-row top">
     {% if page > 1 %}
@@ -355,13 +409,22 @@
             <div class="vol-link-hint">↗ Click a volume to search the catalog for that volume</div>
 
             <div class="vol-grid">
+              {# FIX 1: compute best status for the chip's left-border color class #}
               {% for vol_entry in lib.vol_list %}
+              {% set best_status = namespace(val='out') %}
+              {% for b in vol_entry.branches %}
+                {% if 'Available' in b.status %}{% set best_status.val = 'avail' %}
+                {% elif 'Hold' in b.status and best_status.val != 'avail' %}{% set best_status.val = 'hold' %}
+                {% endif %}
+              {% endfor %}
+
               {% if is_broward %}
                 {% set vol_url = r.broward_url ~ ('&qu=' ~ vol_entry.vol if vol_entry.vol > 0 else '') %}
               {% else %}
                 {% set vol_url = r.lcpl_url ~ ('&qu=' ~ vol_entry.vol if vol_entry.vol > 0 else '') %}
               {% endif %}
-              <a class="vol-chip" href="{{ vol_url }}" target="_blank" rel="noopener"
+              <a class="vol-chip vol-status-{{ best_status.val }}"
+                 href="{{ vol_url }}" target="_blank" rel="noopener"
                  onclick="event.stopPropagation()">
                 <div class="vol-chip-num">
                   {%- if vol_entry.vol == 0 %}Series{% else %}Vol. {{ vol_entry.vol }}{% endif -%}
@@ -486,6 +549,11 @@
 </div>
 
 <script>
+// ── MAL panel toggle — FIX 5 ───────────────────────────────────
+function toggleMalPanel() {
+  document.getElementById('mal-panel').classList.toggle('open');
+}
+
 // ── Library filter pills ───────────────────────────────────────
 document.getElementById('lib-filter-row').addEventListener('click', e => {
   const pill = e.target.closest('.lib-filter-pill');
@@ -554,9 +622,6 @@ function removeFilter(key) {
 }
 
 // ── MAL list — load ────────────────────────────────────────────
-// Called only on first load (button press). Fetches from MAL API,
-// POSTs data + empty filters to Flask session, then reloads so the
-// server-rendered panel appears.
 async function loadMalList() {
   const loadBtn = document.getElementById('mal-load-btn');
   const loading = document.getElementById('mal-loading');
@@ -571,7 +636,6 @@ async function loadMalList() {
     const json = await resp.json();
     if (!json.ok) throw new Error(json.message || 'Failed to load MAL list');
 
-    // Push data + neutral filter state into Flask session
     const setResp = await fetch('/api/mal/set_filter', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -582,7 +646,6 @@ async function loadMalList() {
     });
     if (!setResp.ok) throw new Error('Failed to save MAL session');
 
-    // Reload page 1 so server renders the panel with the loaded list
     const url = new URL(window.location.href);
     url.searchParams.delete('page');
     window.location.href = url.toString();
@@ -595,9 +658,7 @@ async function loadMalList() {
   }
 }
 
-// ── MAL list — toggle a status pill (DOM only, no reload) —————————
-// Cycles the pill state locally and marks it pending. Apply button
-// appears once any pill differs from its last-applied server state.
+// ── MAL list — toggle pill ─────────────────────────────────────
 function toggleMalStatus(status, el) {
   const states = ['', 'include', 'exclude'];
   const icons  = { '': '◦', 'include': '✓', 'exclude': '✕' };
@@ -612,7 +673,7 @@ function toggleMalStatus(status, el) {
   document.getElementById('mal-apply-btn')?.classList.toggle('visible', anyPending);
 }
 
-// ── MAL list — apply pending changes ————————————————————————
+// ── MAL list — apply ───────────────────────────────────────────
 async function applyMalFilters() {
   const applyBtn = document.getElementById('mal-apply-btn');
   if (applyBtn) applyBtn.classList.add('busy');
@@ -638,7 +699,7 @@ async function applyMalFilters() {
   }
 }
 
-// ── MAL list — clear ————————————————————————————————————
+// ── MAL list — clear ───────────────────────────────────────────
 async function clearMalFilter() {
   try {
     await fetch('/api/mal/clear_filter', { method: 'POST' });
@@ -650,7 +711,7 @@ async function clearMalFilter() {
   }
 }
 
-// Snapshot the server-applied state on page load so pending detection works.
+// Snapshot applied state on load
 document.querySelectorAll('.mal-status-item[data-status]').forEach(p => {
   p.dataset.applied = p.dataset.state || '';
 });
