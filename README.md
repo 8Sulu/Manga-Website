@@ -58,12 +58,12 @@ It answers that across 500+ manga titles simultaneously, with real-time per-bran
 │  /search  /admin  /api/stats  /api/suggestions  …       │
 └──────────────┬──────────────────────┬───────────────────┘
                │                      │
-    ┌──────────▼──────┐     ┌─────────▼──────────┐
-    │   MySQL Database │     │  APScheduler Jobs  │
-    │  manga           │     │  get_manga.py       │
-    │  library         │     │  scrapper.py        │
-    │  branch          │     │  broward_scrapper.py│
-    │  availability    │     └────────────────────┘
+    ┌──────────▼───────┐     ┌─────────▼────────────┐
+    │   MySQL Database │     │  APScheduler Jobs    │
+    │  manga           │     │  get_manga.py        │
+    │  library         │     │  scrapper.py         │
+    │  branch          │     │  broward_scrapper.py │
+    │  availability    │     └──────────────────────┘
     │  branch_avail... │
     └──────────────────┘
            ▲
@@ -101,7 +101,7 @@ Both scrapers pull their title/author list from the database, support range and 
 
 ## Scale
 
-- **516 manga titles** tracked across two library systems
 - **7 LCPL branches** with per-volume, per-branch status
+- **37 BCL branches** with per-volume, per-branch status
 - **500-title batches** from MAL with automatic OAuth2 token refresh
 - Incremental scraping — "new only" mode skips already-scraped titles
