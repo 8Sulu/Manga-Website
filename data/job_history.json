@@ -970,5 +970,107 @@
     "status": "done",
     "message": "[*] Done.",
     "at": "2026-06-07T09:31:26.289451+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-07T09:48:00.071170+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-07T09:48:10.331709+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-07T09:48:45.025261+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-07T09:48:59.983198+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-07T09:57:49.719344+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-07T09:59:44.071171+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-07T10:00:21.265975+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-07T10:01:07.621182+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-07T10:02:15.119625+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-07T10:03:00.608825+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-07T10:03:42.014241+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-07T10:05:04.262728+00:00"
+  },
+  {
+    "job": "reset",
+    "status": "done",
+    "message": "✓ Schema recreated · ✓ manga.csv · ✓ libraries.csv · ✓ branches.csv",
+    "at": "2026-06-09T06:50:12.772724+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "error",
+    "message": "/home/ethan/Projects/Manga-Website/venv/bin/python: can't open file '/home/ethan/Projects/Manga-Website/scripts/broward_",
+    "at": "2026-06-09T06:50:15.540224+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "error",
+    "message": "/home/ethan/Projects/Manga-Website/venv/bin/python: can't open file '/home/ethan/Projects/Manga-Website/scripts/scrapper",
+    "at": "2026-06-09T06:50:18.018540+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 530 LCPL availability rows",
+    "at": "2026-06-09T06:55:06.263555+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-09T07:01:57.525417+00:00"
   }
 ]

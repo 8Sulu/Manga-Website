@@ -54,19 +54,6 @@
     .vol-branch-dot.out   { background: var(--red); }
     .vol-branch-name { color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex:1; }
 
-    /* Branch flat list */
-    .branch-avail-grid { display: flex; flex-direction: column; gap: 4px; margin-bottom: .75rem; }
-    .branch-avail-row { display: flex; align-items: center; gap: 8px; }
-    .branch-avail-name {
-      font-family: var(--mono); font-size: .68rem; color: var(--text2);
-      min-width: 90px; flex-shrink: 0;
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    .branch-avail-status { font-family: var(--mono); font-size: .68rem; }
-    .status-avail { color: var(--green); }
-    .status-hold  { color: var(--amber); }
-    .status-out   { color: var(--red); }
-
     /* ── MAL filter panel — FIX 5: collapsible ──────────────── */
     .mal-panel {
       background: var(--bg2); border: 1px solid var(--border);
@@ -441,25 +428,6 @@
               </a>
               {% endfor %}
             </div>
-
-            {% if lib.branch_list %}
-            <div class="section-label" style="margin-top:.9rem">Branch summary</div>
-            <div class="branch-avail-grid">
-              {% for b in lib.branch_list %}
-              <div class="branch-avail-row">
-                <span class="branch-avail-name" title="{{ b.name }}">{{ b.short }}</span>
-                <span class="branch-avail-status
-                  {%- if 'Available' in b.status %} status-avail
-                  {%- elif 'Hold'    in b.status %} status-hold
-                  {%- else %}                        status-out{% endif %}">
-                  {%- if 'Available' in b.status %}Available
-                  {%- elif 'Hold'    in b.status %}On Hold
-                  {%- else %}Checked Out{% endif %}
-                </span>
-              </div>
-              {% endfor %}
-            </div>
-            {% endif %}
 
           {% else %}
             <div style="font-family:var(--mono);font-size:.75rem;color:var(--text3);padding:.4rem 0">
