@@ -1090,5 +1090,11 @@
     "status": "done",
     "message": "inserted 527 LCPL availability rows",
     "at": "2026-06-11T13:42:29.858557+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-11T19:27:02.081972+00:00"
   }
 ]

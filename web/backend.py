@@ -1,35 +1,42 @@
-from flask import (Flask, render_template, request, jsonify, redirect,
-                   url_for, session, make_response)
+from flask import (Flask, render_template, request, jsonify,
+                   redirect, url_for, session)
 from flask_session import Session
-import csv, json, sys, threading, functools, os, secrets, time
+import sys, functools, os, secrets
 from pathlib import Path
 from datetime import datetime, timezone
-from urllib.parse import quote_plus as _quote_plus
 
 sys.path.append(str(Path(__file__).parent.parent))
-from config.settings import DB_CONFIG, DATA_DIR, SCRIPTS_DIR
-from utils.database_utils import get_db_connection, execute_query, execute_update
+
+from config.settings import DATA_DIR, SCRIPTS_DIR
+from utils.database_utils import (get_db_connection, execute_query, execute_update,
+                                   get_library_ids, invalidate_library_id_cache)
 from utils.admin_utils import SCHEMA, INSERT_OPS, insert_csv, parse_range_str
+from utils.job_runner import (start_job, stop_job, get_job, JOB_NAMES,
+                               read_job_history, append_job_history)
+from utils.middleware import rate_limited, client_ip
+from utils.template_filters import register_filters
+from utils.search_utils import build_results
+
+# ── App setup ──────────────────────────────────────────────────────────────────
 
 app = Flask(__name__, static_folder='static')
-app.secret_key = os.getenv('FLASK_SECRET_KEY', secrets.token_hex(32))
-ADMIN_PASSWORD   = os.getenv('ADMIN_PASSWORD', '')
-JOB_HISTORY_PATH = DATA_DIR / "job_history.json"
+app.secret_key    = os.getenv('FLASK_SECRET_KEY', secrets.token_hex(32))
+ADMIN_PASSWORD    = os.getenv('ADMIN_PASSWORD', '')
 
-# ── Server-side session (filesystem) ──────────────────────────────────────────
-_SESSION_DIR = DATA_DIR / "flask_sessions"
+_SESSION_DIR = DATA_DIR / 'flask_sessions'
 _SESSION_DIR.mkdir(parents=True, exist_ok=True)
 app.config.update(
-    SESSION_TYPE             = "filesystem",
+    SESSION_TYPE             = 'filesystem',
     SESSION_FILE_DIR         = str(_SESSION_DIR),
     SESSION_FILE_THRESHOLD   = 500,
     SESSION_PERMANENT        = False,
     SESSION_USE_SIGNER       = True,
     SESSION_COOKIE_SECURE    = True,
     SESSION_COOKIE_HTTPONLY  = True,
-    SESSION_COOKIE_SAMESITE  = "Lax",
+    SESSION_COOKIE_SAMESITE  = 'Lax',
 )
 Session(app)
+register_filters(app)
 
 # ── Security headers ───────────────────────────────────────────────────────────
 
@@ -44,28 +51,6 @@ def set_security_headers(response):
         response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
     return response
 
-# ── Simple in-memory rate limiter ─────────────────────────────────────────────
-
-_rate_limits: dict = {}
-_rate_lock = threading.Lock()
-
-def _rate_limited(key: str, limit: int = 60, window: int = 60) -> bool:
-    now = time.time()
-    with _rate_lock:
-        hits = _rate_limits.get(key, [])
-        hits = [t for t in hits if now - t < window]
-        if len(hits) >= limit:
-            _rate_limits[key] = hits
-            return True
-        hits.append(now)
-        _rate_limits[key] = hits
-    return False
-
-def _client_ip() -> str:
-    return (request.headers.get('X-Real-IP')
-            or request.headers.get('X-Forwarded-For', '').split(',')[0].strip()
-            or request.remote_addr or 'unknown')
-
 # ── CSRF protection ────────────────────────────────────────────────────────────
 
 def _csrf_token() -> str:
@@ -77,9 +62,11 @@ def csrf_protect(f):
     @functools.wraps(f)
     def decorated(*args, **kwargs):
         if request.method in ('POST', 'PUT', 'DELETE', 'PATCH'):
-            token = (request.form.get('csrf_token')
-                     or (request.get_json(silent=True, force=True) or {}).get('csrf_token', '')
-                     or request.headers.get('X-CSRF-Token', ''))
+            token = (
+                request.form.get('csrf_token')
+                or (request.get_json(silent=True) or {}).get('csrf_token', '')
+                or request.headers.get('X-CSRF-Token', '')
+            )
             if not secrets.compare_digest(token, _csrf_token()):
                 return jsonify({'ok': False, 'message': 'Invalid CSRF token'}), 403
         return f(*args, **kwargs)
@@ -101,244 +88,6 @@ def admin_required(f):
         return redirect(url_for('admin_login', next=request.url))
     return decorated
 
-# ── Job system ─────────────────────────────────────────────────────────────────
-
-_jobs: dict    = {}
-_jobs_lock     = threading.Lock()
-_JOB_NAMES     = {'scrape', 'scrape_broward', 'get_manga'}
-
-def _run_subprocess(job_name: str, cmd: list) -> None:
-    import subprocess, re
-    with _jobs_lock:
-        _jobs[job_name].update(running=True, progress=0, message='starting…')
-    proc = subprocess.Popen(
-        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, bufsize=1
-    )
-    last_msg = history_msg = ''
-    progress = 0
-    stopped  = False
-
-    _RESULT_RE    = re.compile(
-        r'inserted|updated|done|complete|stopped|failed|error|no books|no new|'
-        r'All runs|✓|✗|\[\*\]|\[-\]|\[\+\]', re.IGNORECASE)
-    _LOG_PREFIX_RE = re.compile(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}')
-
-    for line in proc.stdout:
-        line = line.rstrip()
-        if not line:
-            continue
-        last_msg = line[:120]
-        m = re.search(r'\[(\d+)/(\d+)\]', line)
-        if m:
-            n, total = int(m.group(1)), int(m.group(2))
-            progress = int(n / total * 100) if total else 0
-        if _RESULT_RE.search(line) and not _LOG_PREFIX_RE.match(line):
-            history_msg = line[:200]
-        with _jobs_lock:
-            if not _jobs[job_name].get('stop_requested'):
-                _jobs[job_name].update(progress=progress, message=last_msg)
-            else:
-                proc.terminate()
-                stopped = True
-                break
-
-    proc.wait()
-    ok = proc.returncode == 0
-
-    if stopped:
-        final_display = history_msg = 'stopped'
-    else:
-        final_display = last_msg if ok else f'error: exited {proc.returncode}'
-
-    if not history_msg:
-        history_msg = last_msg or ('done' if ok else f'exited {proc.returncode}')
-
-    with _jobs_lock:
-        _jobs[job_name].update(
-            running=False,
-            progress=100 if ok else progress,
-            message=final_display,
-        )
-    _append_job_history(job_name, 'done' if ok else 'error', history_msg)
-
-def _start_job(job_name: str, cmd: list) -> tuple[bool, int, str]:
-    with _jobs_lock:
-        if _jobs.get(job_name, {}).get('running'):
-            return False, 409, f'{job_name} is already running'
-        _jobs[job_name] = {
-            'running': False, 'progress': 0,
-            'message': '', 'stop_requested': False,
-        }
-    t = threading.Thread(target=_run_subprocess, args=(job_name, cmd), daemon=True)
-    with _jobs_lock:
-        _jobs[job_name]['thread'] = t
-    t.start()
-    return True, 200, f'{job_name} started'
-
-def _stop_job(job_name: str) -> bool:
-    with _jobs_lock:
-        job = _jobs.get(job_name)
-        if not job or not job.get('running'):
-            return False
-        job['stop_requested'] = True
-    return True
-
-# ── Job history ────────────────────────────────────────────────────────────────
-
-def _read_job_history() -> list:
-    try:
-        if JOB_HISTORY_PATH.exists():
-            return json.loads(JOB_HISTORY_PATH.read_text(encoding='utf-8'))
-    except Exception:
-        pass
-    return []
-
-def _append_job_history(job: str, status: str, message: str) -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    history = _read_job_history()
-    history.append({
-        'job': job, 'status': status, 'message': message,
-        'at': datetime.now(timezone.utc).isoformat(),
-    })
-    try:
-        JOB_HISTORY_PATH.write_text(
-            json.dumps(history[-200:], indent=2, ensure_ascii=False),
-            encoding='utf-8',
-        )
-    except Exception:
-        pass
-
-# ── DB helpers ─────────────────────────────────────────────────────────────────
-
-def _titles_count() -> int:
-    try:
-        res = execute_query("SELECT COUNT(*) AS n FROM manga", fetch_all=False)
-        return res['n'] if res else 0
-    except Exception:
-        return 9999
-
-def _missing_manga_ids(library_pattern: str) -> list:
-    try:
-        manga_ids = [r['MangaID'] for r in execute_query("SELECT MangaID FROM manga ORDER BY MangaID")]
-        scraped = {r['MangaID'] for r in execute_query("""
-            SELECT DISTINCT a.MangaID
-            FROM availability a
-            JOIN branch_availability_status bas ON a.AvailabilityID = bas.AvailabilityID
-            JOIN branch b ON bas.BranchID = b.BranchID
-            JOIN library l ON b.LibraryID = l.LibraryID
-            WHERE l.LibraryName LIKE %s
-        """, (library_pattern,))}
-        return [mid for mid in manga_ids if mid not in scraped]
-    except Exception:
-        return []
-
-# ── Library ID cache ───────────────────────────────────────────────────────────
-
-_library_id_cache: tuple | None = None
-
-def _get_library_ids() -> tuple[int, int]:
-    global _library_id_cache
-    if _library_id_cache is not None:
-        return _library_id_cache
-    try:
-        rows = execute_query("SELECT LibraryID, LibraryName FROM library")
-        lcpl = broward = None
-        for r in rows:
-            name = r['LibraryName'] or ''
-            if 'Leon' in name or 'LeRoy' in name or 'LCPL' in name:
-                lcpl = r['LibraryID']
-            elif 'Broward' in name:
-                broward = r['LibraryID']
-        if lcpl is not None and broward is not None:
-            _library_id_cache = (lcpl, broward)
-            return _library_id_cache
-    except Exception:
-        pass
-    try:
-        rows = execute_query("SELECT LibraryID FROM library ORDER BY LibraryID LIMIT 2")
-        if len(rows) >= 2:
-            return rows[0]['LibraryID'], rows[1]['LibraryID']
-    except Exception:
-        pass
-    return 1, 2
-
-# ── Branch display helpers ─────────────────────────────────────────────────────
-
-def _branch_short(name: str, library_id: int, broward_library_id: int) -> str:
-    if library_id != broward_library_id:
-        for keyword, short in (
-            ('Main',      'Main'),   ('Leroy',     'Main'),
-            ('Northeast', 'NE Branch'), ('Bruce', 'NE Branch'),
-            ('Eastside',  'Eastside'), ('Perry',  'BL Perry'),
-            ('Jackson',   'Lk Jackson'), ('Braden', 'Ft Braden'),
-            ('Fort',      'Ft Braden'), ('Woodville', 'Woodville'),
-        ):
-            if keyword in name:
-                return short
-        return name.split(' ')[0]
-
-    for keyword, short in (
-        ('Northwest Regional', 'NW Regional'), ('North Regional',   'N Regional'),
-        ('South Regional',     'S Regional'),  ('Southwest Regional','SW Regional'),
-        ('West Regional',      'W Regional'),  ('Main Library',      'Main'),
-        ('African American',   'AARLCC'),      ('Hollywood Beach',   'Hollywood Bch'),
-        ('Hollywood',          'Hollywood'),   ('Lauderhill Central','Lauderhill CP'),
-        ('Lauderhill Towne',   'Lauderhill TC'),('Lauderdale Lakes', 'Laud. Lakes'),
-        ('Pompano Beach',      'Pompano Bch'), ('Pembroke Pines',    'Pemb. Pines'),
-        ('Miramar',            'Miramar'),     ('Weston',            'Weston'),
-        ('Tamarac',            'Tamarac'),     ('Sunrise',           'Sunrise'),
-        ('Margate',            'Margate'),     ('Deerfield Beach',   'Deerfield Bch'),
-        ('Dania Beach',        'Dania Bch'),   ('Hallandale',        'Hallandale'),
-        ('Carver Ranches',     'Carver Ranch'),('Century Plaza',     'Century Plz'),
-        ('North Lauderdale',   'N. Laud.'),    ('Imperial Point',    'Imperial Pt'),
-        ('Riverland',          'Riverland'),   ('Davie',             'Davie/CC'),
-        ('Beach Branch',       'Beach'),       ('Jan Moran',         'Jan Moran'),
-        ('Galt Ocean',         'Galt Ocean'),  ('Fort Lauderdale Reading', 'FTL Reading'),
-        ('Tyrone Bryant',      'Tyrone Bryant'),('Northwest Branch', 'NW Branch'),
-        ('Nova Southeastern',  'NSU'),
-    ):
-        if keyword in name:
-            return short
-    return name.split(' ')[0]
-
-STATUS_PRIORITY = {'Available': 2, 'On Hold': 1, 'Checked Out': 0}
-
-# ── Catalog URL builder ────────────────────────────────────────────────────────
-
-def _is_novel(manga_type: str) -> bool:
-    return (manga_type or '').lower().replace(' ', '-') in {'light-novel', 'novel'}
-
-def _broward_search_url(title: str, author: str, manga_type: str = '',
-                        volume: int | None = None) -> str:
-    et   = _quote_plus(title)
-    ea   = _quote_plus(author or '')
-    base = (f"https://broward.ent.sirsi.net/client/en_US/default/search/results"
-            f"?qu=TITLE%3D{et}&qu=AUTHOR%3D{ea}"
-            f"&qf=FORMAT%09Special+Format%09BOOK%09Books")
-    if _is_novel(manga_type):
-        base += "&qu=-SUBJECT%3DComic"
-    if volume is not None and volume > 0:
-        base += f"&qu={volume}"
-    base += "&st=PA"
-    return base
-
-def _lcpl_search_url(title: str, author: str, manga_type: str = '',
-                     volume: int | None = None) -> str:
-    et = _quote_plus(title)
-    ea = _quote_plus(author or '')
-    if _is_novel(manga_type):
-        url = (f"https://lcpl.ent.sirsi.net/client/en_US/lcpl/search/results"
-               f"?qu=&qu=TITLE%3D{et}&qu=AUTHOR%3D{ea}&qu=-SUBJECT%3DComic&te=ILS&lm=BOOKS")
-    else:
-        url = (f"https://lcpl.ent.sirsi.net/client/en_US/lcpl/search/results"
-               f"?qu=&qu=TITLE%3D{et}&qu=AUTHOR%3D{ea}&te=ILS&lm=BOOKS")
-    if volume is not None and volume > 0:
-        url += f"&qu={volume}"
-    return url
-
-# ── Auth routes ────────────────────────────────────────────────────────────────
-
 @app.route('/admin/login', methods=['GET', 'POST'])
 def admin_login():
     if not ADMIN_PASSWORD:
@@ -347,8 +96,8 @@ def admin_login():
 
     error = None
     if request.method == 'POST':
-        ip = _client_ip()
-        if _rate_limited(f'login:{ip}', limit=10, window=300):
+        ip = client_ip()
+        if rate_limited(f'login:{ip}', limit=10, window=300):
             error = 'Too many login attempts. Please wait a few minutes.'
         else:
             pw = request.form.get('password', '')
@@ -367,7 +116,7 @@ def admin_logout():
     session.clear()
     return redirect('/')
 
-# ── Admin GET/POST ─────────────────────────────────────────────────────────────
+# ── Admin dashboard ────────────────────────────────────────────────────────────
 
 @app.route('/admin', methods=['GET', 'POST'])
 @admin_required
@@ -388,12 +137,15 @@ def admin():
     """)
     return render_template('admin.html',
                            manga_per_library=manga_per_library,
-                           job_history=list(reversed(_read_job_history()))[:30])
+                           job_history=list(reversed(read_job_history()))[:30])
+
 
 def _handle_admin_post():
-    token = (request.form.get('csrf_token')
-             or (request.get_json(silent=True) or {}).get('csrf_token', '')
-             or request.headers.get('X-CSRF-Token', ''))
+    token = (
+        request.form.get('csrf_token')
+        or (request.get_json(silent=True) or {}).get('csrf_token', '')
+        or request.headers.get('X-CSRF-Token', '')
+    )
     if not secrets.compare_digest(token, _csrf_token()):
         return jsonify({'ok': False, 'message': 'Invalid CSRF token'}), 403
 
@@ -408,7 +160,7 @@ def _handle_admin_post():
             offset = str(int(offset))
         except ValueError:
             return jsonify({'ok': False, 'message': 'Invalid offset'}), 400
-        ok, status, msg = _start_job(
+        ok, status, msg = start_job(
             'get_manga',
             [sys.executable, str(SCRIPTS_DIR / 'get_manga.py'), offset],
         )
@@ -416,10 +168,11 @@ def _handle_admin_post():
 
     return jsonify({'ok': False, 'message': 'Unknown action'}), 400
 
+
 def _start_scrape_job(action: str):
     is_broward  = action == 'scrape_broward'
     script      = 'broward_scraper.py' if is_broward else 'leon_scraper.py'
-    lib_pattern = '%Broward%' if is_broward else '%Leon%'
+    lib_pattern = '%Broward%'          if is_broward else '%Leon%'
 
     range_str = request.form.get('range', '').strip()
     manga_id  = request.form.get('manga_id', '').strip()
@@ -433,12 +186,15 @@ def _start_scrape_job(action: str):
     elif only_new:
         missing_ids = _missing_manga_ids(lib_pattern)
         if not missing_ids:
-            return jsonify({'ok': False, 'message': f'All titles already have {"Broward" if is_broward else "LCPL"} data'}), 400
+            label = 'Broward' if is_broward else 'LCPL'
+            return jsonify({'ok': False, 'message': f'All titles already have {label} data'}), 400
 
         if range_str:
-            lo, hi   = parse_range_str(range_str, _titles_count())
-            all_ids  = [r['MangaID'] for r in execute_query("SELECT MangaID FROM manga ORDER BY MangaID")]
-            valid_ids = set(all_ids[lo-1:hi])
+            lo, hi    = parse_range_str(range_str, _titles_count())
+            all_ids   = [r['MangaID'] for r in execute_query(
+                'SELECT MangaID FROM manga ORDER BY MangaID'
+            )]
+            valid_ids = set(all_ids[lo - 1:hi])
             missing_ids = [m for m in missing_ids if m in valid_ids]
             if not missing_ids:
                 return jsonify({'ok': False, 'message': f'No new titles in range {range_str}'}), 400
@@ -449,8 +205,8 @@ def _start_scrape_job(action: str):
         lo, hi = parse_range_str(range_str, _titles_count())
         cmd.extend(['--range', f'{lo}-{hi}'])
 
-    ok, status, msg = _start_job(action, cmd)
-    print(f"\n{cmd}\n")
+    ok, status, msg = start_job(action, cmd)
+    print(f'\n{cmd}\n')
     return jsonify({'ok': ok, 'message': msg}), status
 
 # ── Admin reset ────────────────────────────────────────────────────────────────
@@ -458,10 +214,11 @@ def _start_scrape_job(action: str):
 @app.route('/admin/reset', methods=['POST'])
 @admin_required
 def admin_reset():
-    global _library_id_cache
-    token = (request.form.get('csrf_token')
-             or (request.get_json(silent=True) or {}).get('csrf_token', '')
-             or request.headers.get('X-CSRF-Token', ''))
+    token = (
+        request.form.get('csrf_token')
+        or (request.get_json(silent=True) or {}).get('csrf_token', '')
+        or request.headers.get('X-CSRF-Token', '')
+    )
     if not secrets.compare_digest(token, _csrf_token()):
         return jsonify({'ok': False, 'message': 'Invalid CSRF token'}), 403
 
@@ -481,15 +238,15 @@ def admin_reset():
     for filename, query in INSERT_OPS:
         messages.append(insert_csv(filename, query))
 
-    _library_id_cache = None
-    _append_job_history('reset', 'done', ' · '.join(messages))
+    invalidate_library_id_cache()
+    append_job_history('reset', 'done', ' · '.join(messages))
     return jsonify({'ok': True, 'messages': messages})
 
 # ── Public routes ──────────────────────────────────────────────────────────────
 
 @app.route('/')
 def home():
-    lcpl_id, broward_id = _get_library_ids()
+    lcpl_id, broward_id = get_library_ids()
     return render_template('index.html',
                            LCPL_LIBRARY_ID=lcpl_id,
                            BROWARD_LIBRARY_ID=broward_id)
@@ -499,73 +256,74 @@ def home():
 @app.route('/api/stats')
 def api_stats():
     try:
-        volumes = execute_query('SELECT COUNT(*) AS n FROM availability', fetch_all=False)
-        titles  = execute_query('SELECT COUNT(*) AS n FROM manga',        fetch_all=False)
-        last_scraped_msg = 'Never scraped'
-        for log in reversed(_read_job_history()):
+        volumes      = execute_query('SELECT COUNT(*) AS n FROM availability', fetch_all=False)
+        titles       = execute_query('SELECT COUNT(*) AS n FROM manga',        fetch_all=False)
+        last_scraped = 'Never scraped'
+        for log in reversed(read_job_history()):
             if log['job'] in ('scrape', 'scrape_broward') and log['status'] == 'done':
                 try:
                     dt = datetime.fromisoformat(log['at'])
-                    last_scraped_msg = dt.strftime('Scraped %b %-d at %-I:%M %p')
+                    last_scraped = dt.strftime('Scraped %b %-d at %-I:%M %p')
                     break
                 except ValueError:
                     pass
         return jsonify({
             'volumes':      volumes['n'] if volumes else 0,
             'titles':       titles['n']  if titles  else 0,
-            'last_scraped': last_scraped_msg,
+            'last_scraped': last_scraped,
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
 
 @app.route('/api/suggestions')
 def api_suggestions():
     q = request.args.get('q', '').strip()
     if len(q) < 2:
         return jsonify([])
-    ip = _client_ip()
-    if _rate_limited(f'suggest:{ip}', limit=120, window=60):
+    ip = client_ip()
+    if rate_limited(f'suggest:{ip}', limit=120, window=60):
         return jsonify([]), 429
     try:
         rows = execute_query(
-            'SELECT MangaID, Title, Type, Score FROM manga WHERE Title LIKE %s '
-            'ORDER BY Score DESC LIMIT 8',
-            (f'%{q}%',)
+            'SELECT MangaID, Title, Type, Score FROM manga '
+            'WHERE Title LIKE %s ORDER BY Score DESC LIMIT 8',
+            (f'%{q}%',),
         )
         return jsonify([{
             'manga_id': r['MangaID'], 'title': r['Title'],
-            'type': r['Type'], 'score': str(r['Score'] or ''),
+            'type':     r['Type'],   'score': str(r['Score'] or ''),
         } for r in rows])
     except Exception:
         return jsonify([])
 
+
 @app.route('/api/job/<name>')
 @admin_required
 def api_job_status(name):
-    if name not in _JOB_NAMES:
+    if name not in JOB_NAMES:
         return jsonify({'ok': False, 'message': 'unknown job'}), 400
-    with _jobs_lock:
-        job = _jobs.get(name)
+    job = get_job(name)
     if not job:
         return jsonify({'running': False, 'progress': 0, 'message': ''})
-    return jsonify({
-        'running':  job.get('running', False),
-        'progress': job.get('progress', 0),
-        'message':  job.get('message', ''),
-    })
+    return jsonify(job)
+
 
 @app.route('/api/job/stop/<name>', methods=['POST'])
 @admin_required
 def api_job_stop(name):
-    if name not in _JOB_NAMES:
+    if name not in JOB_NAMES:
         return jsonify({'ok': False, 'message': 'unknown job'}), 400
-    stopped = _stop_job(name)
-    return jsonify({'ok': stopped, 'message': 'stop signal sent' if stopped else 'job not running'})
+    stopped = stop_job(name)
+    return jsonify({'ok': stopped,
+                    'message': 'stop signal sent' if stopped else 'job not running'})
+
 
 @app.route('/api/job_history')
 @admin_required
 def api_job_history():
-    return jsonify(list(reversed(_read_job_history()))[:50])
+    return jsonify(list(reversed(read_job_history()))[:50])
+
 
 @app.route('/api/missing_titles')
 @admin_required
@@ -576,6 +334,7 @@ def api_missing_titles():
         'broward_count': len(_missing_manga_ids('%Broward%')),
         'total_titles':  total,
     })
+
 
 @app.route('/api/delete_title_results', methods=['POST'])
 @admin_required
@@ -611,6 +370,7 @@ def api_delete_title_results():
     except Exception as e:
         return jsonify({'ok': False, 'message': str(e)}), 500
 
+
 @app.route('/api/title_volumes/<int:manga_id>')
 @admin_required
 def api_title_volumes(manga_id):
@@ -632,15 +392,16 @@ def api_title_volumes(manga_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# ── MAL manga list proxy ───────────────────────────────────────────────────────
+
+# ── MAL proxy ──────────────────────────────────────────────────────────────────
 
 @app.route('/api/mal/mangalist')
 def api_mal_mangalist():
-    ip = _client_ip()
-    if _rate_limited(f'mal:{ip}', limit=10, window=60):
+    ip = client_ip()
+    if rate_limited(f'mal:{ip}', limit=10, window=60):
         return jsonify({'ok': False, 'message': 'Rate limited'}), 429
 
-    import requests as req
+    import requests as _req
     access_token = os.getenv('MAL_ACCESS_TOKEN', '')
     if not access_token:
         return jsonify({'ok': False, 'message': 'MAL access token not configured'}), 503
@@ -649,10 +410,12 @@ def api_mal_mangalist():
     offset, limit, max_pages = 0, 1000, 10
 
     for _ in range(max_pages):
-        url = (f"https://api.myanimelist.net/v2/users/@me/mangalist"
-               f"?fields=list_status&limit={limit}&offset={offset}")
+        url = (
+            'https://api.myanimelist.net/v2/users/@me/mangalist'
+            f'?fields=list_status&limit={limit}&offset={offset}'
+        )
         try:
-            resp = req.get(url, headers={'Authorization': f'Bearer {access_token}'}, timeout=15)
+            resp = _req.get(url, headers={'Authorization': f'Bearer {access_token}'}, timeout=15)
         except Exception as e:
             return jsonify({'ok': False, 'message': f'MAL API error: {e}'}), 502
 
@@ -662,7 +425,7 @@ def api_mal_mangalist():
             if not new_token:
                 return jsonify({'ok': False, 'message': 'MAL token expired and refresh failed'}), 401
             access_token = new_token
-            resp = req.get(url, headers={'Authorization': f'Bearer {access_token}'}, timeout=15)
+            resp = _req.get(url, headers={'Authorization': f'Bearer {access_token}'}, timeout=15)
             if resp.status_code != 200:
                 return jsonify({'ok': False, 'message': f'MAL API error {resp.status_code}'}), 502
 
@@ -687,10 +450,11 @@ def api_mal_mangalist():
 
     return jsonify({'ok': True, 'data': all_statuses})
 
+
 @app.route('/api/mal/set_filter', methods=['POST'])
 def api_mal_set_filter():
-    ip = _client_ip()
-    if _rate_limited(f'mal_filter:{ip}', limit=60, window=60):
+    ip = client_ip()
+    if rate_limited(f'mal_filter:{ip}', limit=60, window=60):
         return jsonify({'ok': False, 'message': 'Rate limited'}), 429
 
     body        = request.get_json(silent=True) or {}
@@ -700,8 +464,10 @@ def api_mal_set_filter():
     if mal_filters is not None:
         legal      = {'', 'include', 'exclude'}
         valid_keys = {'reading', 'completed', 'on_hold', 'dropped', 'plan_to_read'}
-        session['mal_filters'] = {k: v for k, v in mal_filters.items()
-                                  if k in valid_keys and v in legal}
+        session['mal_filters'] = {
+            k: v for k, v in mal_filters.items()
+            if k in valid_keys and v in legal
+        }
 
     if mal_data is not None:
         if not isinstance(mal_data, dict):
@@ -710,62 +476,23 @@ def api_mal_set_filter():
 
     return jsonify({'ok': True})
 
+
 @app.route('/api/mal/clear_filter', methods=['POST'])
 def api_mal_clear_filter():
     session.pop('mal_data',    None)
     session.pop('mal_filters', None)
     return jsonify({'ok': True})
 
+
 # ── Search ─────────────────────────────────────────────────────────────────────
-
-ON_SHELF = ('Graphic Novel', 'Youth Fiction', 'Adult Non-Fiction', 'Available',
-            'General Collection', 'New Materials')
-
-def _normalize_status(raw: str) -> str:
-    if not raw:
-        return 'Checked Out'
-    if any(kw in raw for kw in ON_SHELF):
-        return 'Available'
-    if 'hold' in raw.lower():
-        return 'On Hold'
-    return 'Checked Out'
-
-def _fmt_scraped_at(dt) -> str | None:
-    """Format a ScrapedAt datetime/string into a short human label, or None."""
-    if dt is None:
-        return None
-    try:
-        if isinstance(dt, str):
-            from datetime import datetime as _dt
-            dt = _dt.fromisoformat(dt)
-        now = datetime.now(timezone.utc)
-        # Make aware if naive
-        if dt.tzinfo is None:
-            from datetime import timezone as _tz
-            dt = dt.replace(tzinfo=_tz.utc)
-        delta = now - dt
-        days  = delta.days
-        if days == 0:
-            return 'today'
-        if days == 1:
-            return 'yesterday'
-        if days < 7:
-            return f'{days}d ago'
-        if days < 31:
-            weeks = days // 7
-            return f'{weeks}w ago'
-        months = days // 30
-        return f'{months}mo ago'
-    except Exception:
-        return None
 
 @app.route('/search')
 def search():
-    ip = _client_ip()
-    if _rate_limited(f'search:{ip}', limit=60, window=60):
+    ip = client_ip()
+    if rate_limited(f'search:{ip}', limit=60, window=60):
         return 'Too many requests', 429
 
-    LCPL_LIBRARY_ID, BROWARD_LIBRARY_ID = _get_library_ids()
+    LCPL_LIBRARY_ID, BROWARD_LIBRARY_ID = get_library_ids()
 
     title        = request.args.get('title',   '').strip()
     type_        = request.args.get('type',    '').strip()
@@ -776,7 +503,7 @@ def search():
     no_vol1      = request.args.get('no_vol1', '').strip()
 
     conditions = ['b.BranchName IS NOT NULL', 'b.BranchID IS NOT NULL']
-    params = []
+    params: list = []
     if title:      conditions.append('m.Title LIKE %s');    params.append(f'%{title}%')
     if type_:      conditions.append('m.Type = %s');        params.append(type_)
     if volume:     conditions.append('a.Volume = %s');      params.append(volume)
@@ -798,163 +525,22 @@ def search():
     """
     rows = execute_query(sql, params)
 
-    titles_map: dict = {}
-    for r in rows:
-        t   = r['Title']
-        lid = r['LibraryID']
-        bid = r['BranchID']
-        if lid is None or bid is None:
-            continue
+    grouped = build_results(
+        rows,
+        lcpl_library_id=LCPL_LIBRARY_ID,
+        broward_library_id=BROWARD_LIBRARY_ID,
+        avail_filter=avail_filter,
+        no_vol1=no_vol1,
+        mal_data=session.get('mal_data'),
+        mal_filters=session.get('mal_filters'),
+    )
 
-        if t not in titles_map:
-            titles_map[t] = {
-                'MangaID': r['MangaID'],  'Title':   t,
-                'Volumes': r['Volumes'],  'Type':    r['Type'],
-                'Members': r['Members'],  'Score':   r['Score'],
-                'author':  r.get('Author') or '',
-                'cover':   r.get('CoverMedium') or '',
-                'lib_data': {},
-                'has_lcpl': False, 'has_broward': False,
-                # Track the most-recent ScrapedAt across all volumes of this title
-                'scraped_at': None,
-            }
-
-        td = titles_map[t]
-
-        # Keep the latest ScrapedAt seen across all rows for this title
-        row_scraped = r.get('ScrapedAt')
-        if row_scraped is not None:
-            if td['scraped_at'] is None or row_scraped > td['scraped_at']:
-                td['scraped_at'] = row_scraped
-
-        td['lib_data'].setdefault(lid, {
-            'library_id':   lid,
-            'library_name': (
-                'Broward County Library' if lid == BROWARD_LIBRARY_ID
-                else 'Leon County Public Library'
-            ),
-            'volumes':      {},
-            'branch_names': {},
-        })
-        ld = td['lib_data'][lid]
-
-        vol         = r['Volume'] if r['Volume'] is not None else 0
-        norm_status = _normalize_status(r.get('Status') or '')
-
-        ld['volumes'].setdefault(vol, {})
-        current = ld['volumes'][vol].get(bid)
-        if current is None or STATUS_PRIORITY[norm_status] > STATUS_PRIORITY.get(current, -1):
-            ld['volumes'][vol][bid] = norm_status
-
-        ld['branch_names'][bid] = r['BranchName']
-
-        if lid == BROWARD_LIBRARY_ID: td['has_broward'] = True
-        elif lid == LCPL_LIBRARY_ID:  td['has_lcpl']    = True
-
-    grouped = []
-    for td in titles_map.values():
-        volume_best_status = {}
-        has_vol1 = False
-        for linfo in td['lib_data'].values():
-            for vol_num, b_dict in linfo['volumes'].items():
-                if vol_num == 1:
-                    has_vol1 = True
-                for bid, status in b_dict.items():
-                    cur = volume_best_status.get(vol_num)
-                    if cur is None or STATUS_PRIORITY[status] > STATUS_PRIORITY.get(cur, -1):
-                        volume_best_status[vol_num] = status
-
-        avail_count = sum(1 for s in volume_best_status.values() if s == 'Available')
-        hold_count  = sum(1 for s in volume_best_status.values() if s == 'On Hold')
-        out_count   = sum(1 for s in volume_best_status.values()
-                          if s not in ('Available', 'On Hold'))
-
-        lib_list = []
-        for linfo in sorted(td['lib_data'].values(), key=lambda x: x['library_id']):
-            branch_best: dict[int, str] = {}
-            vol_list = []
-            for vol_num in sorted(linfo['volumes'].keys()):
-                branch_statuses = linfo['volumes'][vol_num]
-                vol_branches = []
-                for bid in sorted(branch_statuses.keys(),
-                                  key=lambda b: linfo['branch_names'].get(b, '')):
-                    status = branch_statuses[bid]
-                    bname  = linfo['branch_names'].get(bid, '')
-                    vol_branches.append({
-                        'name':   bname,
-                        'short':  _branch_short(bname, linfo['library_id'], BROWARD_LIBRARY_ID),
-                        'status': status,
-                    })
-                    cur_best = branch_best.get(bid)
-                    if cur_best is None or STATUS_PRIORITY[status] > STATUS_PRIORITY.get(cur_best, -1):
-                        branch_best[bid] = status
-                vol_list.append({'vol': vol_num, 'branches': vol_branches})
-
-            branch_list = [{
-                'name':   linfo['branch_names'].get(bid, ''),
-                'short':  _branch_short(linfo['branch_names'].get(bid, ''),
-                                        linfo['library_id'], BROWARD_LIBRARY_ID),
-                'status': branch_best[bid],
-            } for bid in sorted(branch_best.keys(),
-                                 key=lambda b: linfo['branch_names'].get(b, ''))]
-
-            lib_list.append({
-                'library_id':   linfo['library_id'],
-                'library_name': linfo['library_name'],
-                'branch_list':  branch_list,
-                'vol_list':     vol_list,
-            })
-
-        if avail_filter == 'available' and avail_count == 0:
-            continue
-        if avail_filter == 'out' and out_count == 0:
-            continue
-        if no_vol1 == '1' and not has_vol1:
-            continue
-
-        _mal_data    = session.get('mal_data')
-        _mal_filters = session.get('mal_filters')
-        if _mal_data and _mal_filters:
-            include_statuses = [k for k, v in _mal_filters.items() if v == 'include']
-            exclude_statuses = [k for k, v in _mal_filters.items() if v == 'exclude']
-            if include_statuses or exclude_statuses:
-                manga_id_str = str(td['MangaID'])
-                entry        = _mal_data.get(manga_id_str) or _mal_data.get(td['MangaID'])
-                user_status  = entry.get('status', '') if entry else ''
-                if include_statuses and user_status not in include_statuses:
-                    continue
-                if user_status in exclude_statuses:
-                    continue
-
-        manga_type = td.get('Type', '')
-        author     = td.get('author', '')
-        title_str  = td['Title']
-
-        grouped.append({
-            'MangaID':     td['MangaID'],   'Title':    title_str,
-            'Volumes':     td['Volumes'],   'Type':     manga_type,
-            'Members':     td['Members'],   'Score':    td['Score'],
-            'author':      author,          'cover':    td['cover'],
-            'has_lcpl':    td['has_lcpl'],  'has_broward': td['has_broward'],
-            'lib_list':    lib_list,
-            'vol_count':   len({v for linfo in td['lib_data'].values()
-                                for v in linfo['volumes']}),
-            'avail_count': avail_count,
-            'out_count':   out_count,
-            'hold_count':  hold_count,
-            'lcpl_url':    _lcpl_search_url(title_str, author, manga_type),
-            'broward_url': _broward_search_url(title_str, author, manga_type),
-            'is_novel':    _is_novel(manga_type),
-            'scraped_at':  _fmt_scraped_at(td.get('scraped_at')),
-        })
-
-    page     = request.args.get('page', 1, type=int)
+    page     = request.args.get('page',     1,  type=int)
     per_page = request.args.get('per_page', 50, type=int)
 
     total_count = len(grouped)
     total_pages = max(1, (total_count + per_page - 1) // per_page)
     page        = max(1, min(page, total_pages))
-    paginated_results = grouped[(page - 1) * per_page : page * per_page]
 
     filters = {
         'title': title, 'type': type_, 'branch': branch,
@@ -963,42 +549,52 @@ def search():
     }
     return render_template(
         'results.html',
-        results=paginated_results,
+        results=grouped[(page - 1) * per_page : page * per_page],
         count=total_count,
         page=page,
         total_pages=total_pages,
         per_page=per_page,
         filters=filters,
-        has_filters=any(v for k, v in filters.items()),
+        has_filters=any(v for v in filters.values()),
         LCPL_LIBRARY_ID=LCPL_LIBRARY_ID,
         BROWARD_LIBRARY_ID=BROWARD_LIBRARY_ID,
         mal_filters=session.get('mal_filters', {}),
-        mal_active=bool(session.get('mal_filters') and
-                        any(v for v in session.get('mal_filters', {}).values())),
+        mal_active=bool(
+            session.get('mal_filters') and
+            any(v for v in session.get('mal_filters', {}).values())
+        ),
         mal_loaded=bool(session.get('mal_data')),
     )
 
-# ── Jinja2 filters ─────────────────────────────────────────────────────────────
 
-_COVER_PALETTES = [
-    ('hsl(260,40%,14%)', 'hsl(260,60%,55%)'),
-    ('hsl(340,40%,13%)', 'hsl(340,60%,55%)'),
-    ('hsl(200,45%,12%)', 'hsl(200,65%,50%)'),
-    ('hsl(30, 50%,13%)', 'hsl(30, 70%,55%)'),
-    ('hsl(150,40%,12%)', 'hsl(150,55%,46%)'),
-    ('hsl(290,35%,14%)', 'hsl(290,55%,58%)'),
-    ('hsl(10, 45%,13%)', 'hsl(10, 65%,55%)'),
-    ('hsl(220,42%,14%)', 'hsl(220,62%,58%)'),
-]
+# ── Admin DB helpers ───────────────────────────────────────────────────────────
 
-@app.template_filter('cover_gradient')
-def cover_gradient_filter(manga_id):
-    idx = int(manga_id or 0) % len(_COVER_PALETTES)
-    base, accent = _COVER_PALETTES[idx]
-    return (f'background: linear-gradient(160deg, {base} 0%, '
-            f'color-mix(in srgb, {accent} 18%, {base}) 100%);')
+def _titles_count() -> int:
+    try:
+        res = execute_query('SELECT COUNT(*) AS n FROM manga', fetch_all=False)
+        return res['n'] if res else 0
+    except Exception:
+        return 9999
 
-app.jinja_env.filters['urlencode'] = lambda s: _quote_plus(str(s or ''))
+
+def _missing_manga_ids(library_pattern: str) -> list[int]:
+    try:
+        manga_ids = [r['MangaID'] for r in
+                     execute_query('SELECT MangaID FROM manga ORDER BY MangaID')]
+        scraped = {r['MangaID'] for r in execute_query("""
+            SELECT DISTINCT a.MangaID
+            FROM availability a
+            JOIN branch_availability_status bas ON a.AvailabilityID = bas.AvailabilityID
+            JOIN branch b  ON bas.BranchID = b.BranchID
+            JOIN library l ON b.LibraryID  = l.LibraryID
+            WHERE l.LibraryName LIKE %s
+        """, (library_pattern,))}
+        return [mid for mid in manga_ids if mid not in scraped]
+    except Exception:
+        return []
+
+
+# ── Entry point ────────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
     app.run(debug=False, host='127.0.0.1', port=5000)
