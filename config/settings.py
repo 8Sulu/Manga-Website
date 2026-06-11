@@ -102,5 +102,3 @@ BROWARD_BRANCH_ID  = 8   # "Broward County Library (All Branches)"
 SCRAPE_DELAY     = 2
 MAX_RETRIES      = 3
 REQUEST_TIMEOUT  = 30
-
-GOOGLE_BOOKS_API_KEY = os.getenv('GOOGLE_BOOKS_API_KEY', '')

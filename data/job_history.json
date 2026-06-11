@@ -1072,5 +1072,23 @@
     "status": "done",
     "message": "[*] Done.",
     "at": "2026-06-09T07:01:57.525417+00:00"
+  },
+  {
+    "job": "get_manga",
+    "status": "done",
+    "message": "All runs complete.",
+    "at": "2026-06-11T13:39:52.613943+00:00"
+  },
+  {
+    "job": "reset",
+    "status": "done",
+    "message": "✓ Schema recreated · ✓ manga.csv · ✓ libraries.csv · ✓ branches.csv",
+    "at": "2026-06-11T13:39:59.272942+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 527 LCPL availability rows",
+    "at": "2026-06-11T13:42:29.858557+00:00"
   }
 ]

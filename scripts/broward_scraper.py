@@ -20,6 +20,7 @@ import re
 import sys
 import time
 from collections import defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
@@ -91,6 +92,7 @@ def _upsert_results(
     manga_id: int,
     broward_library_id: int,
     volume_branch_map: dict[int, dict[int, str]],
+    scraped_at: str,
 ) -> str:
     """
     Delete-then-insert availability data for one title scoped to the Broward library.
@@ -123,8 +125,8 @@ def _upsert_results(
         if not branch_statuses:
             continue
         cursor.execute(
-            "INSERT INTO availability (MangaID, Volume) VALUES (%s, %s)",
-            (manga_id, volume_num),
+            "INSERT INTO availability (MangaID, Volume, ScrapedAt) VALUES (%s, %s, %s)",
+            (manga_id, volume_num, scraped_at),
         )
         avail_id = cursor.lastrowid
         avail_inserted += 1
@@ -543,8 +545,11 @@ def process_batch(args: argparse.Namespace) -> None:
                     print(f"  [{mark}] vol {vol_num} @ {bname} — {status}")
 
         if volume_branch_map:
+            # One timestamp for all rows in this title's batch
+            scraped_at = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
             try:
-                msg = _upsert_results(cursor, manga_id, broward_library_id, volume_branch_map)
+                msg = _upsert_results(cursor, manga_id, broward_library_id,
+                                      volume_branch_map, scraped_at)
                 db_conn.commit()
                 print(f"  [DB] {msg}", flush=True)
             except Exception as e:

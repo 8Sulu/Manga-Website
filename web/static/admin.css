@@ -1,0 +1,114 @@
+.admin-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 680px) {
+  .admin-two-col { grid-template-columns: 1fr; }
+  .step-desc { display: none; }
+  .branch-mini { grid-template-columns: 1fr; }
+}
+
+/* ── Scrape status strip ──────────────────────────────── */
+.scrape-status-strip {
+  display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 1.5rem;
+}
+.scrape-status-card {
+  flex: 1; min-width: 160px;
+  background: var(--bg3); border: 1px solid var(--border);
+  border-radius: var(--r-lg); padding: .75rem 1rem;
+  display: flex; flex-direction: column; gap: .25rem;
+}
+.scrape-status-card.lcpl    { border-left: 3px solid var(--green); }
+.scrape-status-card.broward { border-left: 3px solid var(--amber); }
+.scrape-status-card.total   { border-left: 3px solid var(--purple); }
+.ssc-label { font-family: var(--mono); font-size: .58rem; letter-spacing: .14em;
+             text-transform: uppercase; color: var(--text3); }
+.ssc-val   { font-family: var(--display); font-size: 1.4rem; font-weight: 700; line-height: 1; }
+.ssc-val.green  { color: var(--green); }
+.ssc-val.amber  { color: var(--amber); }
+.ssc-val.purple { color: var(--purple); }
+.ssc-sub   { font-family: var(--mono); font-size: .62rem; color: var(--text3); }
+.ssc-stale { font-family: var(--mono); font-size: .6rem; color: var(--amber); margin-top: 2px; }
+
+/* ── Re-scrape buttons ────────────────────────────────── */
+.btn-rescrape {
+  font-family: var(--mono); font-size: .6rem; padding: 2px 7px;
+  background: var(--purple-bg); border: 1px solid var(--purple-brd);
+  color: var(--purple); border-radius: var(--r); cursor: pointer;
+  margin-left: 4px; transition: all .15s;
+}
+.btn-rescrape:hover { background: var(--purple); color: #fff; }
+.btn-rescrape-broward {
+  background: var(--amber-bg); border-color: var(--amber-brd); color: var(--amber);
+}
+.btn-rescrape-broward:hover { background: var(--amber); color: #000; }
+
+/* ── Undo bar ─────────────────────────────────────────── */
+.undo-bar {
+  align-items: center; gap: 8px;
+  font-family: var(--mono); font-size: .7rem;
+  padding: .5rem .85rem; background: var(--bg3);
+  border: 1px solid var(--amber-brd); border-radius: var(--r);
+  color: var(--amber); margin-top: .4rem; display: none;
+}
+.undo-bar.visible { display: flex; }
+.undo-btn { font-family: var(--mono); font-size: .65rem; padding: 2px 8px;
+            background: var(--amber-bg); border: 1px solid var(--amber-brd);
+            color: var(--amber); border-radius: var(--r); cursor: pointer; }
+.undo-btn:hover { background: var(--amber); color: #000; }
+
+/* ── Session-expired notice ───────────────────────────── */
+.session-expired-notice {
+  display: none; font-family: var(--mono); font-size: .68rem;
+  padding: .45rem .85rem; background: var(--red-bg);
+  border: 1px solid var(--red-brd); border-radius: var(--r);
+  color: var(--red); margin-top: .4rem;
+}
+.session-expired-notice.visible { display: block; }
+
+/* ── Last-scraped hint ────────────────────────────────── */
+.last-scraped-hint {
+  font-family: var(--mono); font-size: .62rem; color: var(--text3); margin-top: .35rem;
+}
+.last-scraped-hint b { color: var(--text2); font-weight: 400; }
+.last-scraped-hint .stale { color: var(--amber); }
+
+/* ── Branch stats bar chart ───────────────────────────── */
+/*
+ * Layout: flex column so the lib-label divider stretches full width
+ * naturally. The old grid-based layout required grid-column: 1 / -1
+ * on the label which conflicted once we switched to flex.
+ */
+.branch-mini {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.branch-lib-label {
+  font-family: var(--mono); font-size: .58rem; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--text3);
+  margin: .6rem 0 .2rem;
+  /* No grid-column needed — the flex column stretches it full width already */
+}
+
+.branch-lib-label:first-child { margin-top: 0; }
+
+.branch-row-mini {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 8px; border-radius: var(--r); border: 1px solid var(--border);
+  background: linear-gradient(
+    90deg,
+    var(--bar-color, rgba(57,232,138,0.08)) 0%,
+    var(--bar-color, rgba(57,232,138,0.08)) var(--bar-pct, 0%),
+    var(--bg3) var(--bar-pct, 0%),
+    var(--bg3) 100%
+  );
+  transition: background .3s;
+}
+.branch-row-mini.broward  { --bar-color: rgba(255,187,56,0.10); }
+.branch-row-mini:not(.broward) { --bar-color: rgba(57,232,138,0.10); }
+
+.branch-name-mini {
+  font-family: var(--mono); font-size: .65rem; color: var(--text2);
+  flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.branch-count-mini { font-family: var(--mono); font-size: .65rem; color: var(--green); flex-shrink: 0; }
+.branch-row-mini.broward .branch-count-mini { color: var(--amber); }

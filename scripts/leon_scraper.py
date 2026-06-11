@@ -16,6 +16,7 @@ import logging
 import re
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
@@ -342,11 +343,14 @@ def write_to_db(books: list) -> str:
         WHERE a.MangaID IN ({placeholders}) AND bas.AvailabilityID IS NULL
     """, tuple(manga_ids))
 
+    # Timestamp shared across all rows in this write batch
+    scraped_at = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+
     inserted = skipped = 0
     for b in books:
         cursor.execute(
-            "INSERT INTO availability (MangaID, Volume) VALUES (%s, %s)",
-            (b["manga_id"], b["volume"]),
+            "INSERT INTO availability (MangaID, Volume, ScrapedAt) VALUES (%s, %s, %s)",
+            (b["manga_id"], b["volume"], scraped_at),
         )
         avail_id = cursor.lastrowid
 
