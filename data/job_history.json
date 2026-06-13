@@ -1096,5 +1096,11 @@
     "status": "done",
     "message": "[*] Done.",
     "at": "2026-06-11T19:27:02.081972+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-12T20:45:22.624438+00:00"
   }
 ]

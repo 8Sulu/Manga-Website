@@ -46,52 +46,35 @@ function closeCard(card) {
   expanded.style.display = 'none';
 }
 
-// ── Sort ───────────────────────────────────────────────────────
-// State: { key, dir } — dir true = ascending
-const SORT_STORAGE_KEY = 'manga_sort';
+// ── Sort — server-side, persisted in URL (works across pages) ─────────────
+// Sort state is carried in the URL as ?sort=<key>&sort_dir=<asc|desc>
+// so every page navigation preserves the chosen sort order.
 
-let sortState = (() => {
-  try {
-    const saved = sessionStorage.getItem(SORT_STORAGE_KEY);
-    return saved ? JSON.parse(saved) : { key: 'score', dir: false };
-  } catch { return { key: 'score', dir: false }; }
-})();
+function sortCards(key) {
+  const url    = new URL(window.location.href);
+  const curKey = url.searchParams.get('sort')     || 'score';
+  const curDir = url.searchParams.get('sort_dir') || 'desc';
 
-function _applySort(key, dir) {
-  const grid  = document.getElementById('results-grid');
-  if (!grid) return;
-  const cards = [...grid.querySelectorAll('.manga-card')];
-  cards.sort((a, b) => {
-    const va = a.dataset[key], vb = b.dataset[key];
-    const na = parseFloat(va),  nb = parseFloat(vb);
-    const d  = dir ? 1 : -1;
-    if (!isNaN(na) && !isNaN(nb)) return (na - nb) * d;
-    return (va < vb ? -1 : va > vb ? 1 : 0) * d;
-  });
-  cards.forEach(c => grid.appendChild(c));
-}
-
-function _highlightSortBtn(key) {
-  document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
-  const btn = document.getElementById('sort-' + key);
-  if (btn) btn.classList.add('active');
-}
-
-function sortCards(key, btn) {
-  // Toggle direction if same key, else default to descending (false)
-  if (sortState.key === key) {
-    sortState.dir = !sortState.dir;
-  } else {
-    sortState = { key, dir: false };
+  // Toggle direction when clicking the active sort key, else default descending
+  let newDir = 'desc';
+  if (key === curKey) {
+    newDir = curDir === 'desc' ? 'asc' : 'desc';
   }
-  try { sessionStorage.setItem(SORT_STORAGE_KEY, JSON.stringify(sortState)); } catch {}
-  _highlightSortBtn(key);
-  _applySort(key, sortState.dir);
+
+  url.searchParams.set('sort',     key);
+  url.searchParams.set('sort_dir', newDir);
+  url.searchParams.delete('page');   // reset to page 1 on sort change
+  window.location.href = url.toString();
 }
 
-// Restore sort on load
-_highlightSortBtn(sortState.key);
-_applySort(sortState.key, sortState.dir);
+// Highlight the active sort button on load
+(function highlightActiveSort() {
+  const url    = new URL(window.location.href);
+  const curKey = url.searchParams.get('sort') || 'score';
+  document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
+  const btn = document.getElementById('sort-' + curKey);
+  if (btn) btn.classList.add('active');
+})();
 
 // ── Filter chip removal ────────────────────────────────────────
 function removeFilter(key) {
@@ -101,7 +84,9 @@ function removeFilter(key) {
   window.location.href = url.toString();
 }
 
-// ── MAL — load ─────────────────────────────────────────────────
+// ── MAL — load (async poll, #15) ──────────────────────────────────────────
+// POST to /api/mal/mangalist starts a background job; poll status until done.
+
 async function loadMalList() {
   const loadBtn = document.getElementById('mal-load-btn');
   const loading = document.getElementById('mal-loading');
@@ -112,15 +97,21 @@ async function loadMalList() {
   errorEl.style.display = 'none';
 
   try {
-    const resp = await fetch('/api/mal/mangalist');
-    const json = await resp.json();
-    if (!json.ok) throw new Error(json.message || 'Failed to load MAL list');
+    // Start background job
+    const startResp = await fetch('/api/mal/mangalist');
+    const startJson = await startResp.json();
+    if (!startJson.ok) throw new Error(startJson.message || 'Failed to start MAL fetch');
+
+    const jobId = startJson.job_id;
+
+    // Poll until done or error
+    const data = await _pollMalJob(jobId);
 
     const setResp = await fetch('/api/mal/set_filter', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({
-        data:    json.data,
+        data:    data,
         filters: { reading: '', completed: '', on_hold: '', dropped: '', plan_to_read: '' },
       }),
     });
@@ -135,6 +126,28 @@ async function loadMalList() {
     errorEl.style.display = 'inline';
     loadBtn.style.display = 'inline';
   }
+}
+
+async function _pollMalJob(jobId) {
+  const MAX_ATTEMPTS = 60;   // 60 × 2s = 2 min max
+  const POLL_INTERVAL = 2000;
+
+  for (let i = 0; i < MAX_ATTEMPTS; i++) {
+    await new Promise(r => setTimeout(r, POLL_INTERVAL));
+    const resp = await fetch(`/api/mal/mangalist/status/${jobId}`);
+    const json = await resp.json();
+
+    if (!json.ok && json.status !== 'running') {
+      throw new Error(json.message || 'MAL fetch failed');
+    }
+    if (json.status === 'done') {
+      return json.data;
+    }
+    // still running — update loading text
+    const loading = document.getElementById('mal-loading');
+    if (loading) loading.textContent = `Loading MAL list… (${(i + 1) * 2}s)`;
+  }
+  throw new Error('MAL list fetch timed out');
 }
 
 // ── MAL — toggle pill ──────────────────────────────────────────

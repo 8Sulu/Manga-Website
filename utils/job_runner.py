@@ -3,10 +3,9 @@ utils/job_runner.py
 
 In-process thread-based job runner and persistent job history log.
 
-Each job is a subprocess (leon_scraper.py, broward_scraper.py, get_manga.py)
-launched in a daemon thread.  Progress is tracked by parsing [n/total]
-markers from stdout.  State lives in the module-level _jobs dict; because
-gunicorn runs with a single worker (see gunicorn.conf.py) this is safe —
+Each job is a subprocess launched in a daemon thread.  Progress is tracked
+by parsing [n/total] markers from stdout.  State lives in the module-level
+_jobs dict; because gunicorn runs with a single worker this is safe —
 all threads share the same process memory.
 
 Public API
@@ -15,7 +14,7 @@ Public API
     stop_job(name)        → bool
     get_job(name)         → dict | None
     JOB_NAMES             — frozenset of recognised job identifiers
-    read_job_history()    → list[dict]
+    read_job_history()    → list[dict]          (from in-memory cache)
     append_job_history(job, status, message) → None
 """
 from __future__ import annotations
@@ -39,7 +38,16 @@ _jobs:      dict[str, dict] = {}
 _jobs_lock: threading.Lock  = threading.Lock()
 
 
-# ── History file path (resolved lazily to avoid import-time side effects) ─────
+# ── In-memory history cache (#16) ─────────────────────────────────────────────
+# Source of truth is the in-memory list; disk is only written on append.
+# This eliminates the constant file reads that happened on every 1-second poll.
+
+_history:      list[dict]      = []          # newest last
+_history_lock: threading.Lock  = threading.Lock()
+_history_loaded:               bool = False  # loaded from disk on first access
+
+
+# ── History file path ──────────────────────────────────────────────────────────
 
 _history_path: Path | None = None
 
@@ -52,37 +60,55 @@ def _get_history_path() -> Path:
     return _history_path
 
 
-# ── Job history ────────────────────────────────────────────────────────────────
-
-def read_job_history() -> list[dict]:
-    """Return the persisted job history list (newest last), or [] on error."""
+def _ensure_history_loaded() -> None:
+    """Load history from disk once, on first access."""
+    global _history_loaded
+    if _history_loaded:
+        return
     try:
         p = _get_history_path()
         if p.exists():
-            return json.loads(p.read_text(encoding='utf-8'))
+            data = json.loads(p.read_text(encoding='utf-8'))
+            if isinstance(data, list):
+                with _history_lock:
+                    _history.clear()
+                    _history.extend(data)
     except Exception:
         pass
-    return []
+    _history_loaded = True
+
+
+# ── Job history ────────────────────────────────────────────────────────────────
+
+def read_job_history() -> list[dict]:
+    """Return the job history list (newest last).  Reads from in-memory cache."""
+    _ensure_history_loaded()
+    with _history_lock:
+        return list(_history)
 
 
 def append_job_history(job: str, status: str, message: str) -> None:
-    """Append one entry to the job history JSON file (capped at 200 entries)."""
-    try:
-        from config.settings import DATA_DIR
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
-
-    history = read_job_history()
-    history.append({
+    """Append one entry to the in-memory history and flush to disk (capped at 200)."""
+    _ensure_history_loaded()
+    entry = {
         'job':     job,
         'status':  status,
         'message': message,
         'at':      datetime.now(timezone.utc).isoformat(),
-    })
+    }
+    with _history_lock:
+        _history.append(entry)
+        # Keep only the last 200 entries
+        if len(_history) > 200:
+            del _history[:-200]
+        snapshot = list(_history)
+
+    # Write to disk outside the lock so we don't block readers
     try:
+        from config.settings import DATA_DIR
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
         _get_history_path().write_text(
-            json.dumps(history[-200:], indent=2, ensure_ascii=False),
+            json.dumps(snapshot, indent=2, ensure_ascii=False),
             encoding='utf-8',
         )
     except Exception:
@@ -91,20 +117,18 @@ def append_job_history(job: str, status: str, message: str) -> None:
 
 # ── Subprocess runner (runs in a daemon thread) ────────────────────────────────
 
-# Matches lines that contain a meaningful final result worth storing in history
 _RESULT_RE = re.compile(
     r'inserted|updated|done|complete|stopped|failed|error|no books|no new|'
     r'All runs|✓|✗|\[\*\]|\[-\]|\[\+\]',
     re.IGNORECASE,
 )
-# Lines that start with a log timestamp are informational, not result lines
 _LOG_PREFIX_RE = re.compile(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}')
 
 
 def _run_subprocess(job_name: str, cmd: list[str]) -> None:
-    """Read stdout from *cmd*, update job state, then persist the result."""
     with _jobs_lock:
         _jobs[job_name].update(running=True, progress=0, message='starting…')
+        on_complete = _jobs[job_name].get('on_complete')
 
     proc = subprocess.Popen(
         cmd,
@@ -125,13 +149,11 @@ def _run_subprocess(job_name: str, cmd: list[str]) -> None:
 
         last_msg = line[:120]
 
-        # Advance progress bar from [n/total] markers
         m = re.search(r'\[(\d+)/(\d+)\]', line)
         if m:
             n, total = int(m.group(1)), int(m.group(2))
             progress = int(n / total * 100) if total else 0
 
-        # Keep the most informative line for job history
         if _RESULT_RE.search(line) and not _LOG_PREFIX_RE.match(line):
             history_msg = line[:200]
 
@@ -162,16 +184,21 @@ def _run_subprocess(job_name: str, cmd: list[str]) -> None:
 
     append_job_history(job_name, 'done' if ok else 'error', history_msg)
 
+    # Fire optional on_complete callback (e.g. cache invalidation in backend)
+    if on_complete:
+        try:
+            on_complete(job_name, ok)
+        except Exception:
+            pass
+
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
-def start_job(job_name: str, cmd: list[str]) -> tuple[bool, int, str]:
-    """
-    Launch *cmd* in a background daemon thread under *job_name*.
-
-    Returns (ok, http_status, message).  Returns (False, 409, …) if the
-    job is already running.
-    """
+def start_job(
+    job_name: str,
+    cmd: list[str],
+    on_complete=None,          # optional callable(job_name: str, ok: bool)
+) -> tuple[bool, int, str]:
     with _jobs_lock:
         if _jobs.get(job_name, {}).get('running'):
             return False, 409, f'{job_name} is already running'
@@ -180,6 +207,7 @@ def start_job(job_name: str, cmd: list[str]) -> tuple[bool, int, str]:
             'progress':       0,
             'message':        '',
             'stop_requested': False,
+            'on_complete':    on_complete,
         }
 
     t = threading.Thread(
@@ -194,10 +222,6 @@ def start_job(job_name: str, cmd: list[str]) -> tuple[bool, int, str]:
 
 
 def stop_job(job_name: str) -> bool:
-    """
-    Signal *job_name* to stop by setting stop_requested.
-    Returns True if the job was running, False otherwise.
-    """
     with _jobs_lock:
         job = _jobs.get(job_name)
         if not job or not job.get('running'):
@@ -207,11 +231,6 @@ def stop_job(job_name: str) -> bool:
 
 
 def get_job(job_name: str) -> dict | None:
-    """
-    Return a snapshot of the current job state, or None if the job has
-    never been started.  The returned dict is a copy — safe to read outside
-    the lock.
-    """
     with _jobs_lock:
         job = _jobs.get(job_name)
         if not job:

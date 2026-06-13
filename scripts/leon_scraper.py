@@ -44,6 +44,7 @@ ILSWS_BASE       = "https://lcpl.sirsi.net/lcpl_ilsws/rest/standard/lookupTitleI
 RESULTS_PER_PAGE = 12
 REQUEST_DELAY    = 0.5
 MAX_RETRIES      = 3
+DB_BATCH_SIZE    = 20   # commit to DB after every N titles
 
 
 # ── HTTP session ──────────────────────────────────────────────────────────────
@@ -249,7 +250,7 @@ def scrape(
     all_pairs = load_title_author_map()
 
     if manga_ids:
-        target_ids    = set(manga_ids)
+        target_ids      = set(manga_ids)
         pairs_to_scrape = [p for p in all_pairs if p[3] in target_ids]
     else:
         pairs_to_scrape = all_pairs[max(0, start - 1):end]
@@ -309,7 +310,7 @@ def scrape(
     return all_books
 
 
-# ── Database write ─────────────────────────────────────────────────────────────
+# ── Database write with batch commits ─────────────────────────────────────────
 
 def write_to_db(books: list) -> str:
     if not books:
@@ -327,6 +328,7 @@ def write_to_db(books: list) -> str:
         return "error: LCPL library not found in DB — run a DB reset first"
     lcpl_library_id = row[0]
 
+    # ── Delete old data for all affected titles up-front ─────────────────────
     manga_ids    = list({b["manga_id"] for b in books})
     placeholders = ",".join(["%s"] * len(manga_ids))
 
@@ -343,16 +345,30 @@ def write_to_db(books: list) -> str:
         WHERE a.MangaID IN ({placeholders}) AND bas.AvailabilityID IS NULL
     """, tuple(manga_ids))
 
-    # Timestamp shared across all rows in this write batch
+    # Commit the deletes first so we don't hold locks during the slow insert loop
+    conn.commit()
+
     scraped_at = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
 
-    inserted = skipped = 0
+    inserted    = skipped     = 0
+    batch_rows  = 0           # rows since last commit
+    manga_batch = 0           # titles since last commit
+
+    # Group books by manga_id so we can count title boundaries
+    current_manga_id: int | None = None
+
     for b in books:
+        # Detect title boundary for batch-size counting
+        if b["manga_id"] != current_manga_id:
+            current_manga_id = b["manga_id"]
+            manga_batch += 1
+
         cursor.execute(
             "INSERT INTO availability (MangaID, Volume, ScrapedAt) VALUES (%s, %s, %s)",
             (b["manga_id"], b["volume"], scraped_at),
         )
         avail_id = cursor.lastrowid
+        batch_rows += 1
 
         for branch_key, status in b["branch_status"]:
             branch_id = branch_id_map.get(branch_key.upper())
@@ -362,12 +378,23 @@ def write_to_db(books: list) -> str:
                     "(AvailabilityID, BranchID, Status) VALUES (%s, %s, %s)",
                     (avail_id, branch_id, status),
                 )
-                inserted += 1
+                inserted   += 1
+                batch_rows += 1
             else:
                 skipped += 1
                 log.warning(f"  Unknown branch key '{branch_key}' — not in BRANCH_MAPPING")
 
-    conn.commit()
+        # ── Batch commit every DB_BATCH_SIZE titles ───────────────────────────
+        if manga_batch >= DB_BATCH_SIZE:
+            conn.commit()
+            print(f"  [DB] committed batch ({manga_batch} titles, {batch_rows} rows)", flush=True)
+            manga_batch = batch_rows = 0
+
+    # ── Final commit ──────────────────────────────────────────────────────────
+    if batch_rows > 0:
+        conn.commit()
+        print(f"  [DB] final commit ({manga_batch} titles, {batch_rows} rows)", flush=True)
+
     cursor.close()
     conn.close()
 

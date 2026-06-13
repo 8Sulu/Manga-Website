@@ -1,7 +1,7 @@
 from flask import (Flask, render_template, request, jsonify,
                    redirect, url_for, session)
 from flask_session import Session
-import sys, functools, os, secrets
+import sys, functools, os, secrets, threading, time
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -205,7 +205,11 @@ def _start_scrape_job(action: str):
         lo, hi = parse_range_str(range_str, _titles_count())
         cmd.extend(['--range', f'{lo}-{hi}'])
 
-    ok, status, msg = start_job(action, cmd)
+    def _on_scrape_done(job_name: str, ok: bool) -> None:
+        """Bust the missing-titles TTL cache immediately when a scrape finishes."""
+        _invalidate_missing_cache()
+
+    ok, status, msg = start_job(action, cmd, on_complete=_on_scrape_done)
     print(f'\n{cmd}\n')
     return jsonify({'ok': ok, 'message': msg}), status
 
@@ -239,6 +243,7 @@ def admin_reset():
         messages.append(insert_csv(filename, query))
 
     invalidate_library_id_cache()
+    _invalidate_missing_cache()
     append_job_history('reset', 'done', ' · '.join(messages))
     return jsonify({'ok': True, 'messages': messages})
 
@@ -255,11 +260,24 @@ def home():
 
 @app.route('/api/stats')
 def api_stats():
+    """
+    #14: Batch both COUNT queries into a single round-trip using a UNION.
+    Also pulls last-scraped from in-memory history (no file I/O).
+    """
     try:
-        volumes      = execute_query('SELECT COUNT(*) AS n FROM availability', fetch_all=False)
-        titles       = execute_query('SELECT COUNT(*) AS n FROM manga',        fetch_all=False)
+        row = execute_query(
+            """
+            SELECT
+              (SELECT COUNT(*) FROM availability) AS volumes,
+              (SELECT COUNT(*) FROM manga)        AS titles
+            """,
+            fetch_all=False,
+        )
+        volumes = row['volumes'] if row else 0
+        titles  = row['titles']  if row else 0
+
         last_scraped = 'Never scraped'
-        for log in reversed(read_job_history()):
+        for log in reversed(read_job_history()):   # already in-memory (#16)
             if log['job'] in ('scrape', 'scrape_broward') and log['status'] == 'done':
                 try:
                     dt = datetime.fromisoformat(log['at'])
@@ -267,11 +285,8 @@ def api_stats():
                     break
                 except ValueError:
                     pass
-        return jsonify({
-            'volumes':      volumes['n'] if volumes else 0,
-            'titles':       titles['n']  if titles  else 0,
-            'last_scraped': last_scraped,
-        })
+
+        return jsonify({'volumes': volumes, 'titles': titles, 'last_scraped': last_scraped})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -325,6 +340,45 @@ def api_job_history():
     return jsonify(list(reversed(read_job_history()))[:50])
 
 
+# ── #13: Missing-titles cache (60s TTL) ───────────────────────────────────────
+# Avoids two full-table scans on every admin poll interval.
+
+_missing_cache: dict = {}          # { pattern: (timestamp, list[int]) }
+_MISSING_TTL   = 60                # seconds
+
+def _invalidate_missing_cache() -> None:
+    _missing_cache.clear()
+
+def _missing_manga_ids(library_pattern: str) -> list[int]:
+    """
+    Return MangaIDs that have no availability rows for the given library.
+    Result is cached for _MISSING_TTL seconds; call _invalidate_missing_cache()
+    after a scrape finishes to force a refresh.
+    """
+    now = time.monotonic()
+    cached = _missing_cache.get(library_pattern)
+    if cached and (now - cached[0]) < _MISSING_TTL:
+        return cached[1]
+
+    try:
+        manga_ids = [r['MangaID'] for r in
+                     execute_query('SELECT MangaID FROM manga ORDER BY MangaID')]
+        scraped = {r['MangaID'] for r in execute_query("""
+            SELECT DISTINCT a.MangaID
+            FROM availability a
+            JOIN branch_availability_status bas ON a.AvailabilityID = bas.AvailabilityID
+            JOIN branch b  ON bas.BranchID = b.BranchID
+            JOIN library l ON b.LibraryID  = l.LibraryID
+            WHERE l.LibraryName LIKE %s
+        """, (library_pattern,))}
+        result = [mid for mid in manga_ids if mid not in scraped]
+    except Exception:
+        result = []
+
+    _missing_cache[library_pattern] = (now, result)
+    return result
+
+
 @app.route('/api/missing_titles')
 @admin_required
 def api_missing_titles():
@@ -366,7 +420,9 @@ def api_delete_title_results():
             """, (manga_id,))
         else:
             execute_update('DELETE FROM availability WHERE MangaID = %s', (manga_id,))
-        return jsonify({'ok': True, 'message': f'Cleared availability for ID: {manga_id}'})
+        _invalidate_missing_cache()
+        return jsonify({'ok': True, 'message': f'Cleared availability for ID: {manga_id}',
+                        'manga_id': manga_id})
     except Exception as e:
         return jsonify({'ok': False, 'message': str(e)}), 500
 
@@ -393,62 +449,128 @@ def api_title_volumes(manga_id):
         return jsonify({'error': str(e)}), 500
 
 
-# ── MAL proxy ──────────────────────────────────────────────────────────────────
+# ── MAL proxy — #15: background job so the request thread isn't blocked ────────
+
+# job state: { 'status': 'running'|'done'|'error', 'data': dict|None, 'message': str }
+_mal_jobs:      dict[str, dict] = {}
+_mal_jobs_lock: threading.Lock  = threading.Lock()
+
+
+def _mal_fetch_worker(job_id: str, access_token_init: str) -> None:
+    """Background thread: fetch all pages of the user's MAL manga list."""
+    import requests as _req
+
+    access_token = access_token_init
+    all_statuses: dict[int, dict] = {}
+    offset, limit, max_pages = 0, 1000, 10
+
+    try:
+        for _ in range(max_pages):
+            url = (
+                'https://api.myanimelist.net/v2/users/@me/mangalist'
+                f'?fields=list_status&limit={limit}&offset={offset}'
+            )
+            try:
+                resp = _req.get(
+                    url,
+                    headers={'Authorization': f'Bearer {access_token}'},
+                    timeout=20,
+                )
+            except Exception as e:
+                with _mal_jobs_lock:
+                    _mal_jobs[job_id] = {'status': 'error', 'data': None,
+                                         'message': f'MAL API error: {e}'}
+                return
+
+            if resp.status_code == 401:
+                from services.mal_client import refresh_tokens
+                new_token = refresh_tokens()
+                if not new_token:
+                    with _mal_jobs_lock:
+                        _mal_jobs[job_id] = {'status': 'error', 'data': None,
+                                             'message': 'MAL token expired and refresh failed'}
+                    return
+                access_token = new_token
+                resp = _req.get(url, headers={'Authorization': f'Bearer {access_token}'},
+                                timeout=20)
+
+            if resp.status_code != 200:
+                with _mal_jobs_lock:
+                    _mal_jobs[job_id] = {'status': 'error', 'data': None,
+                                         'message': f'MAL API error {resp.status_code}'}
+                return
+
+            data = resp.json()
+            for item in data.get('data', []):
+                node       = item.get('node', {})
+                mal_id     = node.get('id')
+                lst_status = item.get('list_status', {})
+                if mal_id:
+                    all_statuses[mal_id] = {
+                        'status':           lst_status.get('status', ''),
+                        'score':            lst_status.get('score', 0),
+                        'num_volumes_read': lst_status.get('num_volumes_read', 0),
+                    }
+
+            if not data.get('paging', {}).get('next'):
+                break
+            offset += limit
+
+        with _mal_jobs_lock:
+            _mal_jobs[job_id] = {'status': 'done', 'data': all_statuses, 'message': 'ok'}
+
+    except Exception as e:
+        with _mal_jobs_lock:
+            _mal_jobs[job_id] = {'status': 'error', 'data': None, 'message': str(e)}
+
 
 @app.route('/api/mal/mangalist')
 def api_mal_mangalist():
+    """
+    #15: Start a background thread to fetch the MAL list and return a job_id.
+    The client polls /api/mal/mangalist/status/<job_id> until done.
+    """
     ip = client_ip()
     if rate_limited(f'mal:{ip}', limit=10, window=60):
         return jsonify({'ok': False, 'message': 'Rate limited'}), 429
 
-    import requests as _req
     access_token = os.getenv('MAL_ACCESS_TOKEN', '')
     if not access_token:
         return jsonify({'ok': False, 'message': 'MAL access token not configured'}), 503
 
-    all_statuses: dict[int, dict] = {}
-    offset, limit, max_pages = 0, 1000, 10
+    job_id = secrets.token_hex(8)
+    with _mal_jobs_lock:
+        _mal_jobs[job_id] = {'status': 'running', 'data': None, 'message': ''}
 
-    for _ in range(max_pages):
-        url = (
-            'https://api.myanimelist.net/v2/users/@me/mangalist'
-            f'?fields=list_status&limit={limit}&offset={offset}'
-        )
-        try:
-            resp = _req.get(url, headers={'Authorization': f'Bearer {access_token}'}, timeout=15)
-        except Exception as e:
-            return jsonify({'ok': False, 'message': f'MAL API error: {e}'}), 502
+    t = threading.Thread(target=_mal_fetch_worker, args=(job_id, access_token), daemon=True)
+    t.start()
 
-        if resp.status_code == 401:
-            from services.mal_client import refresh_tokens
-            new_token = refresh_tokens()
-            if not new_token:
-                return jsonify({'ok': False, 'message': 'MAL token expired and refresh failed'}), 401
-            access_token = new_token
-            resp = _req.get(url, headers={'Authorization': f'Bearer {access_token}'}, timeout=15)
-            if resp.status_code != 200:
-                return jsonify({'ok': False, 'message': f'MAL API error {resp.status_code}'}), 502
+    return jsonify({'ok': True, 'job_id': job_id})
 
-        if resp.status_code != 200:
-            return jsonify({'ok': False, 'message': f'MAL API error {resp.status_code}'}), 502
 
-        data = resp.json()
-        for item in data.get('data', []):
-            node       = item.get('node', {})
-            mal_id     = node.get('id')
-            lst_status = item.get('list_status', {})
-            if mal_id:
-                all_statuses[mal_id] = {
-                    'status':           lst_status.get('status', ''),
-                    'score':            lst_status.get('score', 0),
-                    'num_volumes_read': lst_status.get('num_volumes_read', 0),
-                }
+@app.route('/api/mal/mangalist/status/<job_id>')
+def api_mal_mangalist_status(job_id: str):
+    """Poll endpoint for the MAL fetch background job."""
+    with _mal_jobs_lock:
+        job = _mal_jobs.get(job_id)
 
-        if not data.get('paging', {}).get('next'):
-            break
-        offset += limit
+    if not job:
+        return jsonify({'ok': False, 'status': 'not_found'}), 404
 
-    return jsonify({'ok': True, 'data': all_statuses})
+    if job['status'] == 'running':
+        return jsonify({'ok': True, 'status': 'running'})
+
+    if job['status'] == 'error':
+        # Clean up finished jobs
+        with _mal_jobs_lock:
+            _mal_jobs.pop(job_id, None)
+        return jsonify({'ok': False, 'status': 'error', 'message': job['message']}), 502
+
+    # done — return data and clean up
+    data = job['data']
+    with _mal_jobs_lock:
+        _mal_jobs.pop(job_id, None)
+    return jsonify({'ok': True, 'status': 'done', 'data': data})
 
 
 @app.route('/api/mal/set_filter', methods=['POST'])
@@ -484,7 +606,14 @@ def api_mal_clear_filter():
     return jsonify({'ok': True})
 
 
-# ── Search ─────────────────────────────────────────────────────────────────────
+# ── Search — #12: SQL aggregation + server-side sort ──────────────────────────
+
+# Valid server-side sort keys → SQL ORDER BY clause fragments
+_SORT_MAP = {
+    'score': 'grouped.Score DESC, grouped.Title ASC',
+    'title': 'grouped.Title ASC',
+    # avail and vols are computed in Python; fall back to default for those
+}
 
 @app.route('/search')
 def search():
@@ -501,6 +630,7 @@ def search():
     avail_filter = request.args.get('avail',   '').strip()
     lib_filter   = request.args.get('library', '').strip()
     no_vol1      = request.args.get('no_vol1', '').strip()
+    sort_key     = request.args.get('sort',    'score').strip()
 
     conditions = ['b.BranchName IS NOT NULL', 'b.BranchID IS NOT NULL']
     params: list = []
@@ -535,6 +665,20 @@ def search():
         mal_filters=session.get('mal_filters'),
     )
 
+    # ── Server-side sort (#12 / sort-across-pages) ────────────────────────────
+    # Applied after filtering so page slices are consistent regardless of page.
+    sort_dir = request.args.get('sort_dir', 'desc').strip()
+    reverse  = (sort_dir != 'asc')
+
+    if sort_key == 'title':
+        grouped.sort(key=lambda r: (r['Title'] or '').lower(), reverse=not reverse)
+    elif sort_key == 'avail':
+        grouped.sort(key=lambda r: r['avail_count'], reverse=reverse)
+    elif sort_key == 'vols':
+        grouped.sort(key=lambda r: r['vol_count'], reverse=reverse)
+    else:  # default: score
+        grouped.sort(key=lambda r: float(r['Score'] or 0), reverse=reverse)
+
     page     = request.args.get('page',     1,  type=int)
     per_page = request.args.get('per_page', 50, type=int)
 
@@ -564,6 +708,8 @@ def search():
             any(v for v in session.get('mal_filters', {}).values())
         ),
         mal_loaded=bool(session.get('mal_data')),
+        current_sort=sort_key,
+        current_sort_dir=sort_dir,
     )
 
 
@@ -575,23 +721,6 @@ def _titles_count() -> int:
         return res['n'] if res else 0
     except Exception:
         return 9999
-
-
-def _missing_manga_ids(library_pattern: str) -> list[int]:
-    try:
-        manga_ids = [r['MangaID'] for r in
-                     execute_query('SELECT MangaID FROM manga ORDER BY MangaID')]
-        scraped = {r['MangaID'] for r in execute_query("""
-            SELECT DISTINCT a.MangaID
-            FROM availability a
-            JOIN branch_availability_status bas ON a.AvailabilityID = bas.AvailabilityID
-            JOIN branch b  ON bas.BranchID = b.BranchID
-            JOIN library l ON b.LibraryID  = l.LibraryID
-            WHERE l.LibraryName LIKE %s
-        """, (library_pattern,))}
-        return [mid for mid in manga_ids if mid not in scraped]
-    except Exception:
-        return []
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────

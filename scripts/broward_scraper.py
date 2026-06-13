@@ -54,17 +54,17 @@ HEADERS = {
     "Origin":           BASE_URL,
 }
 
-# SD_ITEM_STATUS values meaning the item is physically on the shelf
 ON_SHELF_STATUSES = {
     "general collection", "new materials", "reference",
     "graphic novels", "young adult", "children",
 }
 
+DB_BATCH_SIZE = 20   # commit to DB after every N titles
+
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
 
 def _load_broward_branch_map() -> dict[str, int]:
-    """Return {BranchName: BranchID} for all Broward branches in the DB."""
     conn = get_connection()
     cur  = conn.cursor(dictionary=True)
     cur.execute(
@@ -94,10 +94,6 @@ def _upsert_results(
     volume_branch_map: dict[int, dict[int, str]],
     scraped_at: str,
 ) -> str:
-    """
-    Delete-then-insert availability data for one title scoped to the Broward library.
-    Returns a human-readable summary string.
-    """
     if not volume_branch_map:
         return "no volume data to store"
 
@@ -141,13 +137,9 @@ def _upsert_results(
     return f"inserted {avail_inserted} avail + {branch_inserted} branch rows"
 
 
-# ── Detail page parser (single-result redirect) ───────────────────────────────
+# ── Detail page parser ────────────────────────────────────────────────────────
 
 def _parse_detail_page(soup: BeautifulSoup, manga_type: str = "") -> dict | None:
-    """
-    Parse a SirsiDynix detail page (the redirect when there is exactly one result).
-    Returns an item dict compatible with the multi-result path, or None on failure.
-    """
     try:
         id_element = soup.find(string=re.compile(r"SD_ILS:\d+"))
         if not id_element:
@@ -196,13 +188,6 @@ def get_search_results(
     manga_type: str,
     debug: bool,
 ) -> tuple[list[dict], str]:
-    """
-    Paginate through catalog search results and return:
-        (items, sdcsrf_token)
-
-    Each item dict has: item_id, volume, index.
-    The sdcsrf token is required for subsequent lookuptitleinfo POSTs.
-    """
     all_items: list[dict] = []
     seen:      set[str]   = set()
     offset     = 0
@@ -239,7 +224,6 @@ def get_search_results(
             if r.status_code != 200:
                 break
 
-            # Single-result redirect ─ parse the detail page directly
             if "/one" in r.url:
                 log.info("  Redirected to detail page — parsing directly.")
                 soup = BeautifulSoup(r.text, "html.parser")
@@ -252,7 +236,6 @@ def get_search_results(
                     all_items.append(item)
                 break
 
-            # Multi-result page ─ extract CSRF token
             if not sdcsrf:
                 m = (re.search(r'var __sdcsrf = "([^"]+)"', r.text) or
                      re.search(r'name="sdcsrf"\s*value="([^"]+)"', r.text))
@@ -323,7 +306,6 @@ def fetch_item_availability(
     sdcsrf: str,
     debug: bool,
 ) -> list[dict]:
-    """POST to lookuptitleinfo and return per-copy {library, status, on_shelf} dicts."""
     ent_encoded = f"ent:$002f$002fSD_ILS$002f0$002fSD_ILS:{item_id}"
     info_url = (
         f"{BASE_URL}{CLIENT}/search/results"
@@ -374,19 +356,13 @@ def fetch_item_availability(
         return []
 
 
-# ── Aggregate copies into a volume → branch → status map ─────────────────────
+# ── Aggregate copies ──────────────────────────────────────────────────────────
 
 def build_volume_branch_map(
     item_copies: list[tuple[int, list[dict]]],
     branch_map: dict[str, int],
     debug: bool,
 ) -> dict[int, dict[int, str]]:
-    """
-    Collapse individual copy records into:
-        { volume_number: { branch_id: best_status } }
-
-    "Best" is defined by STATUS_PRIORITY (Available > On Hold > Checked Out).
-    """
     result:    dict[int, dict[int, str]] = defaultdict(dict)
     unmatched: set[str]                  = set()
 
@@ -449,7 +425,6 @@ def process_batch(args: argparse.Namespace) -> None:
         return
     broward_library_id = row["LibraryID"]
 
-    # Select titles to scrape
     if args.manga_ids:
         target_ids = set(args.manga_ids)
         pairs = [p for p in all_pairs if p[3] in target_ids]
@@ -483,13 +458,15 @@ def process_batch(args: argparse.Namespace) -> None:
     db_conn = get_connection()
     cursor  = db_conn.cursor()
 
-    session = requests.Session()
-    session.get(f"{BASE_URL}{CLIENT}", timeout=20)
-    session.headers.update({
+    http_session = requests.Session()
+    http_session.get(f"{BASE_URL}{CLIENT}", timeout=20)
+    http_session.headers.update({
         "User-Agent":      HEADERS["User-Agent"],
         "Accept-Language": HEADERS["Accept-Language"],
         "Referer":         f"{BASE_URL}{CLIENT}",
     })
+
+    batch_count = 0   # titles written since last commit
 
     for progress, (idx, title, author, manga_id, manga_type) in enumerate(pairs, 1):
         if not author:
@@ -498,7 +475,7 @@ def process_batch(args: argparse.Namespace) -> None:
 
         print(f"[{progress}/{len(pairs)}] {title}", flush=True)
 
-        items, sdcsrf = get_search_results(session, title, author, manga_type, args.debug)
+        items, sdcsrf = get_search_results(http_session, title, author, manga_type, args.debug)
         if not items:
             print("  [-] No catalog entries found")
             continue
@@ -508,7 +485,7 @@ def process_batch(args: argparse.Namespace) -> None:
         item_copies: list[tuple[int, list[dict]]] = []
         for item in items:
             copies = fetch_item_availability(
-                session, item["item_id"], item["index"],
+                http_session, item["item_id"], item["index"],
                 title, author, sdcsrf, args.debug,
             )
             item_copies.append((item["volume"], copies))
@@ -545,18 +522,35 @@ def process_batch(args: argparse.Namespace) -> None:
                     print(f"  [{mark}] vol {vol_num} @ {bname} — {status}")
 
         if volume_branch_map:
-            # One timestamp for all rows in this title's batch
             scraped_at = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
             try:
                 msg = _upsert_results(cursor, manga_id, broward_library_id,
                                       volume_branch_map, scraped_at)
-                db_conn.commit()
-                print(f"  [DB] {msg}", flush=True)
+                batch_count += 1
+
+                # ── Batch commit every DB_BATCH_SIZE titles ───────────────────
+                if batch_count >= DB_BATCH_SIZE:
+                    db_conn.commit()
+                    print(f"  [DB] committed batch of {batch_count} titles", flush=True)
+                    batch_count = 0
+                else:
+                    print(f"  [DB] {msg}", flush=True)
+
             except Exception as e:
                 db_conn.rollback()
+                batch_count = 0
                 print(f"  [DB] Error: {e}", flush=True)
         else:
             print("  [--] No matched branches to store", flush=True)
+
+    # ── Final commit for any remaining titles ─────────────────────────────────
+    if batch_count > 0:
+        try:
+            db_conn.commit()
+            print(f"[DB] final commit ({batch_count} title(s))", flush=True)
+        except Exception as e:
+            db_conn.rollback()
+            print(f"[DB] final commit error: {e}", flush=True)
 
     cursor.close()
     db_conn.close()

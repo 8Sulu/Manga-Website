@@ -78,16 +78,19 @@
       {%- endif -%}
     </div>
     <div class="sort-btns">
-      <button class="sort-btn" id="sort-score" onclick="sortCards('score',this)">Score</button>
-      <button class="sort-btn" id="sort-title" onclick="sortCards('title',this)">A–Z</button>
-      <button class="sort-btn" id="sort-avail" onclick="sortCards('avail',this)">Available</button>
-      <button class="sort-btn" id="sort-vols"  onclick="sortCards('vols',this)">Volumes</button>
+      <button class="sort-btn" id="sort-score" onclick="sortCards('score')">Score</button>
+      <button class="sort-btn" id="sort-title" onclick="sortCards('title')">A–Z</button>
+      <button class="sort-btn" id="sort-avail" onclick="sortCards('avail')">Available</button>
+      <button class="sort-btn" id="sort-vols"  onclick="sortCards('vols')">Volumes</button>
     </div>
   </div>
 
+  <!-- ── Pagination macro ──────────────────────────────────────── -->
+  {# base_qs includes sort params so page links preserve sort state #}
+  {% set base_qs %}{% for k, v in request.args.items() %}{% if k != 'page' %}&{{ k }}={{ v | urlencode }}{% endif %}{% endfor %}{% endset %}
+
   <!-- ── Top pagination ────────────────────────────────────────── -->
   {% if total_pages > 1 %}
-  {% set base_qs %}{% for k, v in request.args.items() %}{% if k != 'page' %}&{{ k }}={{ v | urlencode }}{% endif %}{% endfor %}{% endset %}
   <div class="pagination-row top">
     {% if page > 1 %}<a class="pg-btn" href="/search?page={{ page - 1 }}{{ base_qs }}">← Prev</a>
     {% else %}<span class="pg-btn disabled">← Prev</span>{% endif %}
