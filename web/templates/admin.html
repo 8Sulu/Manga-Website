@@ -3,334 +3,175 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
   <title>Admin — Manga Tracker</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}">
   <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
-  <meta name="csrf-token" content="{{ csrf_token() }}">
 </head>
 <body>
-<div class="grid-bg"></div>
-<div class="shell" style="position:relative;z-index:1;padding-bottom:5rem">
+<div class="shell admin-shell">
 
-  <!-- ── Header ───────────────────────────────────────────────── -->
-  <header class="hero" style="padding-top:1.75rem;padding-bottom:1.25rem;margin-bottom:1.25rem">
-    <div class="hero-left">
-      <div class="hero-eyebrow">Admin dashboard</div>
-      <h1 class="hero-title" style="font-size:clamp(1.4rem,3vw,2rem)">Data <span>Pipeline</span></h1>
-      <div class="hero-sub" id="admin-status">漫画追跡システム — loading…</div>
-    </div>
-    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:.6rem">
-      <div class="hero-stats" style="gap:1rem">
-        <div class="hstat"><div class="hstat-val" id="stat-volumes">—</div><div class="hstat-lbl">Volumes</div></div>
-        <div class="hstat"><div class="hstat-val" id="stat-titles">—</div><div class="hstat-lbl">Titles</div></div>
-      </div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <a href="/" style="font-family:var(--mono);font-size:.65rem;color:var(--text3)">← Public site</a>
-        <a href="/admin/logout" style="font-family:var(--mono);font-size:.65rem;color:var(--text3);padding:4px 10px;border:1px solid var(--border2);border-radius:var(--r);background:var(--bg3)">Logout</a>
-      </div>
-    </div>
+  <header class="page-header">
+    <a href="/" class="back-link">← Public search</a>
+    <span class="sep">|</span>
+    <span class="hero-eyebrow">Admin dashboard</span>
+    <a href="/admin/logout" class="back-link" style="margin-left:auto">Log out</a>
   </header>
 
-  <!-- ── Collection status strip ──────────────────────────────── -->
-  <div class="section-label">Collection status</div>
-  <div class="scrape-status-strip" style="margin-bottom:1.5rem">
-    <div class="scrape-status-card total">
-      <div class="ssc-label">Titles in DB</div>
-      <div class="ssc-val purple" id="ssc-titles">—</div>
-      <div class="ssc-sub" id="ssc-titles-sub">loading…</div>
+  <!-- ── Stats row ──────────────────────────────────────────────── -->
+  <div class="admin-stats-row">
+    <div class="admin-stat-card">
+      <div class="admin-stat-label">Total volumes</div>
+      <div class="admin-stat-value" id="stat-volumes">…</div>
     </div>
-    <div class="scrape-status-card lcpl">
-      <div class="ssc-label">LCPL scraped</div>
-      <div class="ssc-val green" id="ssc-lcpl-volumes">—</div>
-      <div class="ssc-sub" id="ssc-lcpl-missing"></div>
-      <div class="ssc-stale" id="ssc-lcpl-stale" style="display:none"></div>
+    <div class="admin-stat-card">
+      <div class="admin-stat-label">Titles tracked</div>
+      <div class="admin-stat-value" id="stat-titles">…</div>
     </div>
-    <div class="scrape-status-card broward">
-      <div class="ssc-label">Broward scraped</div>
-      <div class="ssc-val amber" id="ssc-broward-volumes">—</div>
-      <div class="ssc-sub" id="ssc-broward-missing"></div>
-      <div class="ssc-stale" id="ssc-broward-stale" style="display:none"></div>
+    <div class="admin-stat-card">
+      <div class="admin-stat-label">Last scraped</div>
+      <div class="admin-stat-value small" id="stat-last-scraped">…</div>
     </div>
   </div>
 
-  <!-- ── Pipeline ─────────────────────────────────────────────── -->
-  <div class="section-label">Data pipeline</div>
-  <div class="pipeline" style="margin-bottom:1.5rem">
-
-    <!-- Step 1: Fetch Manga -->
-    <div class="pipeline-step">
-      <div class="step-header">
-        <div class="step-num">1</div>
-        <div class="step-title">Fetch Manga Batch</div>
-        <div class="step-desc">Pull ranked titles from MyAnimeList API (500 at a time)</div>
-      </div>
-      <div class="step-body">
-        <form id="form-get_manga" class="tool-row" onsubmit="return startJob(event,'get_manga')">
-          <input type="hidden" name="action" value="get_manga">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <input type="number" name="offset" placeholder="Offset (0, 500, 1000…)" min="0" required style="max-width:200px">
-          <button type="submit" class="primary" id="btn-get_manga">Run</button>
-          <button type="button" id="stop-get_manga" class="stop-btn" onclick="stopJob('get_manga')" style="display:none">■ Stop</button>
-        </form>
-        <div class="range-hint" style="margin-top:.5rem">
-          <b>Offset 0</b> = ranks 1–500 · <b>500</b> = 501–1000 · and so on
-          · <span id="hint-db-titles" style="color:var(--text2)">— titles currently in DB</span>
-        </div>
-        <div id="job-get_manga" class="job-box">
-          <div class="job-label">
-            <span class="job-name">GET MANGA</span>
-            <span class="job-msg" id="job-get_manga-msg"></span>
-            <span class="job-pct" id="job-get_manga-pct"></span>
-          </div>
-          <progress id="job-get_manga-bar" value="0" max="100"></progress>
-        </div>
-        <div class="session-expired-notice" id="session-get_manga">Session expired — job may still be running. <a href="/admin/login" style="color:var(--red)">Re-login</a></div>
-      </div>
-    </div>
-
-    <!-- Step 2: LCPL Scrape -->
-    <div class="pipeline-step">
-      <div class="step-header">
-        <div class="step-num">2</div>
-        <div class="step-title">Scrape Leon County Library</div>
-        <span class="step-badge lcpl">LCPL</span>
-        <div class="step-desc">Per-branch availability across all 7 LCPL branches via ILSWS</div>
-      </div>
-      <div class="step-body">
-        <form id="form-scrape" class="tool-row" onsubmit="return startJob(event,'scrape')">
-          <input type="hidden" name="action" value="scrape">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <input type="text" name="range" placeholder="Range (e.g. 1–20)" style="max-width:140px">
-          <label class="inline" title="Only scrape titles with no existing LCPL data">
-            <input type="checkbox" name="only_new" value="1"> New only
-          </label>
-          <button type="submit" class="primary" id="btn-scrape">Run</button>
-          <button type="button" id="stop-scrape" class="stop-btn" onclick="stopJob('scrape')" style="display:none">■ Stop</button>
-        </form>
-        <div class="last-scraped-hint" id="lcpl-scrape-hint">Loading…</div>
-        <div id="job-scrape" class="job-box">
-          <div class="job-label">
-            <span class="job-name">SCRAPE LCPL</span>
-            <span class="job-msg" id="job-scrape-msg"></span>
-            <span class="job-pct" id="job-scrape-pct"></span>
-          </div>
-          <progress id="job-scrape-bar" value="0" max="100"></progress>
-        </div>
-        <div class="session-expired-notice" id="session-scrape">Session expired — job may still be running. <a href="/admin/login" style="color:var(--red)">Re-login</a></div>
-      </div>
-    </div>
-
-    <!-- Step 3: Broward Scrape -->
-    <div class="pipeline-step">
-      <div class="step-header">
-        <div class="step-num broward">3</div>
-        <div class="step-title">Scrape Broward County Library</div>
-        <span class="step-badge broward">BCL</span>
-        <div class="step-desc">Title-level availability across Broward catalog</div>
-      </div>
-      <div class="step-body">
-        <form id="form-scrape_broward" class="tool-row" onsubmit="return startJob(event,'scrape_broward')">
-          <input type="hidden" name="action" value="scrape_broward">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <input type="text" name="range" placeholder="Range (e.g. 1–20)" style="max-width:140px">
-          <label class="inline" title="Only scrape titles with no existing Broward data">
-            <input type="checkbox" name="only_new" value="1"> New only
-          </label>
-          <button type="submit" class="primary" id="btn-scrape_broward">Run</button>
-          <button type="button" id="stop-scrape_broward" class="stop-btn" onclick="stopJob('scrape_broward')" style="display:none">■ Stop</button>
-        </form>
-        <div class="last-scraped-hint" id="broward-scrape-hint">Loading…</div>
-        <div id="job-scrape_broward" class="job-box">
-          <div class="job-label">
-            <span class="job-name" style="color:var(--amber)">SCRAPE BCL</span>
-            <span class="job-msg" id="job-scrape_broward-msg"></span>
-            <span class="job-pct" id="job-scrape_broward-pct"></span>
-          </div>
-          <progress id="job-scrape_broward-bar" value="0" max="100"></progress>
-        </div>
-        <div class="session-expired-notice" id="session-scrape_broward">Session expired — job may still be running. <a href="/admin/login" style="color:var(--red)">Re-login</a></div>
-      </div>
-    </div>
-
-    <!-- Step 4: Manual Overrides -->
-    <div class="pipeline-step">
-      <div class="step-header">
-        <div class="step-num">4</div>
-        <div class="step-title">Manual Overrides</div>
-        <div class="step-desc">Clear title availability data; re-scrape specific titles</div>
-      </div>
-      <div class="step-body">
-        <div class="admin-two-col">
-
-          <!-- Clear title availability -->
-          <div>
-            <div class="tool-title">Clear title availability</div>
-            <div class="tool-row">
-              <input type="text" id="del-results-title" placeholder="Exact title" style="flex:1">
-              <select id="del-results-lib" style="width:90px;font-size:.72rem">
-                <option value="">All libs</option>
-                <option value="1">LCPL</option>
-                <option value="2">Broward</option>
-              </select>
-              <button type="button" class="danger" onclick="deleteTitleResultsConfirmed()">Clear</button>
-            </div>
-            <div id="del-results-undo" class="undo-bar">
-              Cleared — <button class="undo-btn" onclick="undoClear()">Undo (scrape again)</button>
-              <span id="del-results-title-saved" style="display:none"></span>
-            </div>
-            <div id="del-results-msg" style="font-family:var(--mono);font-size:.68rem;margin-top:.4rem"></div>
-          </div>
-
-          <!-- Title search + re-scrape -->
-          <div>
-            <div class="tool-title">Find &amp; re-scrape title</div>
-            <div class="batch-manager">
-              <div class="batch-search-row">
-                <input type="text" id="batch-search" placeholder="Search title…" oninput="batchSearch(this.value)"
-                       style="flex:1;border:none;background:transparent;padding:0">
-              </div>
-              <div class="batch-results" id="batch-results">
-                <div style="font-family:var(--mono);font-size:.7rem;color:var(--text3);padding:.6rem .75rem">Type to search titles in the DB</div>
-              </div>
-            </div>
-          </div>
-
-        </div>
-      </div>
-    </div>
+  <!-- ── Missing titles ─────────────────────────────────────────── -->
+  <div class="admin-missing-row">
+    <span class="admin-missing-label" id="missing-lcpl">…</span>
+    <span class="admin-missing-label" id="missing-broward">…</span>
   </div>
 
-  <!-- ── Stats & Danger row ────────────────────────────────────── -->
-  <div class="admin-two-col" style="margin-bottom:1.5rem">
-    <div>
-      <div class="section-label">Collection by location</div>
-      {% if manga_per_library %}
-      <div class="branch-mini">
-        {% set ns = namespace(last_lib='', group_max=1) %}
-        {% for row in manga_per_library %}
-          {% set is_broward = 'Broward' in row.LibraryName %}
-          {% if row.LibraryName != ns.last_lib %}
-            <div class="branch-lib-label">{{ row.LibraryName }}</div>
-            {% set ns.last_lib  = row.LibraryName %}
-            {% set ns.group_max = row.VolumeCount if row.VolumeCount > 0 else 1 %}
-          {% endif %}
-          {% set bar_pct = ((row.VolumeCount / ns.group_max) * 100) | int %}
-          <div class="branch-row-mini {{ 'broward' if is_broward }}" style="--bar-pct: {{ bar_pct }}%">
-            <span class="branch-name-mini" title="{{ row.BranchName }}">
-              {% if   'Northeast' in row.BranchName %}NE Branch
-              {% elif 'Leroy'     in row.BranchName or ('Main' in row.BranchName and not is_broward) %}Main
-              {% elif 'Jackson'   in row.BranchName %}Lk Jackson
-              {% elif 'Perry'     in row.BranchName %}BL Perry
-              {% elif 'Braden'    in row.BranchName %}Ft Braden
-              {% elif 'Eastside'  in row.BranchName %}Eastside
-              {% elif 'Woodville' in row.BranchName %}Woodville
-              {% elif 'Northwest Regional' in row.BranchName %}NW Regional
-              {% elif 'North Regional'     in row.BranchName %}N Regional
-              {% elif 'South Regional'     in row.BranchName %}S Regional
-              {% elif 'Southwest Regional' in row.BranchName %}SW Regional
-              {% elif 'West Regional'      in row.BranchName %}W Regional
-              {% elif 'Main Library'       in row.BranchName %}Main
-              {% elif 'African'            in row.BranchName %}AARLCC
-              {% elif 'Hollywood Beach'    in row.BranchName %}Hollywood Bch
-              {% elif 'Hollywood'          in row.BranchName %}Hollywood
-              {% elif 'Lauderhill Central' in row.BranchName %}Lauderhill CP
-              {% elif 'Lauderhill Towne'   in row.BranchName %}Lauderhill TC
-              {% elif 'Lauderdale Lakes'   in row.BranchName %}Laud. Lakes
-              {% elif 'Pompano'            in row.BranchName %}Pompano Bch
-              {% elif 'Pembroke Pines'     in row.BranchName %}Pemb. Pines
-              {% elif 'Miramar'            in row.BranchName %}Miramar
-              {% elif 'Weston'             in row.BranchName %}Weston
-              {% elif 'Tamarac'            in row.BranchName %}Tamarac
-              {% elif 'Sunrise'            in row.BranchName %}Sunrise
-              {% elif 'Margate'            in row.BranchName %}Margate
-              {% elif 'Deerfield'          in row.BranchName %}Deerfield Bch
-              {% elif 'Dania'              in row.BranchName %}Dania Bch
-              {% elif 'Hallandale'         in row.BranchName %}Hallandale
-              {% elif 'Carver'             in row.BranchName %}Carver Ranch
-              {% elif 'Century'            in row.BranchName %}Century Plz
-              {% elif 'North Lauderdale'   in row.BranchName %}N. Laud.
-              {% elif 'Imperial'           in row.BranchName %}Imperial Pt
-              {% elif 'Riverland'          in row.BranchName %}Riverland
-              {% elif 'Davie'              in row.BranchName %}Davie/CC
-              {% elif 'Beach Branch'       in row.BranchName %}Beach
-              {% elif 'Jan Moran'          in row.BranchName %}Jan Moran
-              {% elif 'Galt'               in row.BranchName %}Galt Ocean
-              {% elif 'Fort Lauderdale Reading' in row.BranchName %}FTL Reading
-              {% elif 'Tyrone'             in row.BranchName %}Tyrone Bryant
-              {% elif 'Northwest Branch'   in row.BranchName %}NW Branch
-              {% elif 'Nova'               in row.BranchName %}NSU Library
-              {% elif 'Stirling'           in row.BranchName %}Stirling Rd
-              {% else %}{{ row.BranchName | truncate(16, True, '…') }}{% endif %}
-            </span>
-            <span class="branch-count-mini">{{ row.VolumeCount }}</span>
-          </div>
-        {% endfor %}
+  <!-- ── Two-column job area ────────────────────────────────────── -->
+  <div class="admin-two-col">
+
+    <!-- LCPL scraper -->
+    <div class="admin-job-card">
+      <div class="admin-job-title">Leon County (LCPL)</div>
+      <form id="form-scrape" onsubmit="event.preventDefault();submitScrapeForm('scrape')">
+        <label class="admin-label">Range (e.g. 1–50, blank = all)
+          <input class="admin-input" name="range" type="text" placeholder="1-50">
+        </label>
+        <label class="admin-label">Single MangaID
+          <input class="admin-input" name="manga_id" type="text" placeholder="21">
+        </label>
+        <label class="admin-checkbox">
+          <input type="checkbox" name="only_new" value="1"> Only scrape missing titles
+        </label>
+        <div class="admin-btn-row">
+          <button id="start-btn-scrape" class="btn primary" type="submit">▶ Scrape LCPL</button>
+          <button id="stop-btn-scrape"  class="btn danger"  type="button"
+                  style="display:none" onclick="stopJob('scrape')">■ Stop</button>
+        </div>
+      </form>
+      <div class="job-progress-wrap">
+        <div class="job-progress-bar" id="progress-scrape" style="display:none;width:0%"></div>
       </div>
-      {% else %}
-      <p class="empty">No data — run a scrape first.</p>
+      <div class="job-status-text" id="status-scrape"></div>
+    </div>
+
+    <!-- Broward scraper -->
+    <div class="admin-job-card">
+      <div class="admin-job-title">Broward County (BCL)</div>
+      <form id="form-scrape_broward" onsubmit="event.preventDefault();submitScrapeForm('scrape_broward')">
+        <label class="admin-label">Range (e.g. 1–50, blank = all)
+          <input class="admin-input" name="range" type="text" placeholder="1-50">
+        </label>
+        <label class="admin-label">Single MangaID
+          <input class="admin-input" name="manga_id" type="text" placeholder="21">
+        </label>
+        <label class="admin-checkbox">
+          <input type="checkbox" name="only_new" value="1"> Only scrape missing titles
+        </label>
+        <div class="admin-btn-row">
+          <button id="start-btn-scrape_broward" class="btn primary" type="submit">▶ Scrape Broward</button>
+          <button id="stop-btn-scrape_broward"  class="btn danger"  type="button"
+                  style="display:none" onclick="stopJob('scrape_broward')">■ Stop</button>
+        </div>
+      </form>
+      <div class="job-progress-wrap">
+        <div class="job-progress-bar" id="progress-scrape_broward" style="display:none;width:0%"></div>
+      </div>
+      <div class="job-status-text" id="status-scrape_broward"></div>
+    </div>
+
+    <!-- get_manga job -->
+    <div class="admin-job-card">
+      <div class="admin-job-title">Update manga list (MAL)</div>
+      <form id="form-get_manga" onsubmit="event.preventDefault();submitScrapeForm('get_manga')">
+        <label class="admin-label">Start offset (0 = beginning)
+          <input class="admin-input" name="offset" type="number" value="0" min="0">
+        </label>
+        <div class="admin-btn-row">
+          <button id="start-btn-get_manga" class="btn primary" type="submit">▶ Fetch titles</button>
+          <button id="stop-btn-get_manga"  class="btn danger"  type="button"
+                  style="display:none" onclick="stopJob('get_manga')">■ Stop</button>
+        </div>
+      </form>
+      <div class="job-progress-wrap">
+        <div class="job-progress-bar" id="progress-get_manga" style="display:none;width:0%"></div>
+      </div>
+      <div class="job-status-text" id="status-get_manga"></div>
+    </div>
+
+    <!-- DB reset -->
+    <div class="admin-job-card">
+      <div class="admin-job-title">Database</div>
+      <p class="admin-desc">Drop and recreate all tables, re-seed libraries and branches from CSV.</p>
+      <button id="reset-btn" class="btn danger" onclick="resetDatabase()">Reset Database</button>
+    </div>
+
+  </div><!-- /.admin-two-col -->
+
+  <!-- ── Branch stats chart ─────────────────────────────────────── -->
+  {% if manga_per_library %}
+  <div class="admin-section-title">Holdings by branch</div>
+  <div id="branch-chart" class="branch-chart">
+    {% set ns = namespace(cur_lib='', group_max=0) %}
+    {# Compute per-library maxes first #}
+    {% set lib_maxes = {} %}
+    {% for row in manga_per_library %}
+      {% if row.LibraryName not in lib_maxes %}
+        {% set _ = lib_maxes.update({row.LibraryName: row.VolumeCount}) %}
       {% endif %}
-    </div>
+    {% endfor %}
 
-    <div>
-      <div class="section-label">Danger zone</div>
-      <div class="danger-zone">
-        <div class="danger-header">
-          <div class="danger-icon">⚠</div>
-          <div class="danger-title">Reset database</div>
-        </div>
-        <div class="danger-body">
-          <p class="danger-note">Drops all tables and re-seeds from CSVs. All existing availability data will be permanently deleted.</p>
-          <p class="danger-note" style="color:var(--amber);margin-bottom:.75rem">Type <b style="color:var(--text)">RESET</b> to enable.</p>
-          <div class="danger-confirm-row">
-            <input type="text" id="reset-confirm" class="reset-confirm-input"
-                   placeholder="Type RESET" oninput="checkResetConfirm()"
-                   autocomplete="off" spellcheck="false">
-            <button id="btn-reset" class="danger" disabled onclick="doReset()">Reset DB</button>
-          </div>
-          <div id="reset-result" style="font-family:var(--mono);font-size:.68rem;margin-top:.6rem;color:var(--text3)"></div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ── Job history ───────────────────────────────────────────── -->
-  <div class="card">
-    <div class="section-label">Job history
-      <button onclick="refreshHistory()" style="font-family:var(--mono);font-size:.6rem;padding:2px 7px;margin-left:4px">Refresh</button>
-    </div>
-    <div class="history-list" id="history-list">
-      {% if job_history %}
-        {% for h in job_history %}
-        <div class="history-entry {{ 'history-err' if h.status == 'error' else 'history-ok' }}">
-          <span class="history-icon">{{ '✗' if h.status == 'error' else '✓' }}</span>
-          <span class="history-job">{{ h.job }}</span>
-          <span class="history-msg" title="{{ h.message }}">{{ h.message }}</span>
-          <span class="history-time">{{ h.at[:16].replace('T',' ') }}</span>
-        </div>
-        {% endfor %}
-      {% else %}
-      <div style="font-family:var(--mono);font-size:.72rem;color:var(--text3);padding:.5rem 0">No job history yet.</div>
+    {% for row in manga_per_library %}
+      {% if row.LibraryName != ns.cur_lib %}
+        {% if ns.cur_lib %}</div>{% endif %}
+        {% set ns.cur_lib   = row.LibraryName %}
+        {% set ns.group_max = lib_maxes[row.LibraryName] %}
+        <div class="chart-group" data-max="{{ ns.group_max }}">
+          <div class="chart-lib-label">{{ row.LibraryName }}</div>
       {% endif %}
-    </div>
+      <div class="bar-row" data-count="{{ row.VolumeCount }}">
+        <span class="bar-branch">{{ row.BranchName }}</span>
+        <div class="bar-track"><div class="bar-fill" style="width:0%"></div></div>
+        <span class="bar-count">{{ row.VolumeCount }}</span>
+        <span class="bar-pct"></span>
+      </div>
+    {% endfor %}
+    {% if ns.cur_lib %}</div>{% endif %}
+  </div>
+  {% endif %}
+
+  <!-- ── Job history ─────────────────────────────────────────────── -->
+  <div class="admin-section-title">Job history</div>
+  <table class="admin-table history-table">
+    <thead><tr><th>Job</th><th>Status</th><th>Message</th><th>At</th></tr></thead>
+    <tbody id="history-tbody">
+      <tr><td colspan="4">Loading…</td></tr>
+    </tbody>
+  </table>
+
+  <div class="admin-footer">
+    <span class="deco-jp">管理者</span>
+    <a class="back-link" href="/">← Public search</a>
   </div>
 
-  <div style="padding-top:1rem;display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--border);margin-top:1.5rem">
-    <span class="deco-jp">管理パネル</span>
-    <span style="font-family:var(--mono);font-size:.62rem;color:var(--text3)">manga-website.duckdns.org</span>
-  </div>
-</div>
+</div><!-- /.shell -->
 
-<!-- Sticky progress footer -->
-<div class="sticky-footer" id="sticky-footer">
-  <span class="sf-job" id="sf-job-name">JOB</span>
-  <div class="sf-progress"><progress id="sf-bar" value="0" max="100" style="width:100%;height:3px"></progress></div>
-  <span class="sf-msg" id="sf-msg"></span>
-  <span class="sf-pct" id="sf-pct">0%</span>
-  <button class="sf-stop" id="sf-stop-btn">■ Stop</button>
-</div>
-
-<div class="toast-shelf" id="toasts"></div>
-<script src="{{ url_for('static', filename='admin.js') }}"></script>
+<!-- Job names as data — tiny inline, no logic (#6 note) -->
+<script>const JOB_NAMES = {{ ['scrape', 'scrape_broward', 'get_manga'] | tojson }};</script>
+<script src="{{ url_for('static', filename='admin.js') }}" defer></script>
 </body>
 </html>

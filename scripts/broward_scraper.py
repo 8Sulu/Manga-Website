@@ -17,7 +17,6 @@ import argparse
 import csv
 import logging
 import re
-import sys
 import time
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -25,8 +24,6 @@ from pathlib import Path
 
 import requests
 from bs4 import BeautifulSoup
-
-sys.path.append(str(Path(__file__).parent.parent))
 
 from config.settings import BROWARD_BRANCH_MAPPING
 from utils.database_utils import get_connection

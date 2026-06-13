@@ -1,0 +1,32 @@
+[build-system]
+requires      = ["setuptools>=70", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name        = "manga-website"
+version     = "0.1.0"
+description = "Personal manga library availability tracker"
+requires-python = ">=3.11"
+
+dependencies = [
+    "flask>=3.0",
+    "flask-session>=0.8",
+    "mysql-connector-python>=8.3",
+    "requests>=2.32",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff", "mypy"]
+
+[tool.setuptools.packages.find]
+where   = ["."]
+include = ["web*", "config*", "utils*", "services*", "scripts*"]
+
+[tool.ruff]
+line-length    = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -14,15 +14,12 @@ from __future__ import annotations
 import json
 import logging
 import re
-import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
 from bs4 import BeautifulSoup
-
-sys.path.append(str(Path(__file__).parent.parent))
 
 from config.settings import DATA_DIR, BRANCH_MAPPING
 from utils.database_utils import get_connection

@@ -5,8 +5,6 @@ import sys, functools, os, secrets, threading, time
 from pathlib import Path
 from datetime import datetime, timezone
 
-sys.path.append(str(Path(__file__).parent.parent))
-
 from config.settings import DATA_DIR, SCRIPTS_DIR
 from utils.database_utils import (get_db_connection, execute_query, execute_update,
                                    get_library_ids, invalidate_library_id_cache)

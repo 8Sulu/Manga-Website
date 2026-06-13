@@ -1,420 +1,246 @@
-/* admin.js — Manga Tracker admin panel JS */
+/**
+ * static/admin.js
+ *
+ * Admin dashboard JS — extracted from inline <script> in admin.html (#6).
+ * Handles job polling, stats, branch chart, and all admin actions.
+ */
 
-// ── CSRF helper ────────────────────────────────────────────────
-function getCsrf() {
-  return document.querySelector('meta[name="csrf-token"]')?.content || '';
+// ── Config ─────────────────────────────────────────────────────────────────────
+
+const POLL_INTERVAL   = 1500;     // ms between job status polls
+const STATS_INTERVAL  = 30_000;   // ms between background stats refreshes
+const MISSING_INTERVAL = 10_000;  // ms between missing-titles polls
+
+// Read CSRF token injected into a <meta> tag by admin.html
+function csrfToken() {
+    return document.querySelector('meta[name="csrf-token"]')?.content || '';
 }
 
-// ── Utility ────────────────────────────────────────────────────
-function toast(msg, type = '') {
-  const el = Object.assign(document.createElement('div'),
-    { className: 'toast ' + type, textContent: msg });
-  document.getElementById('toasts').appendChild(el);
-  setTimeout(() => el.remove(), 5000);
+// ── Utilities ──────────────────────────────────────────────────────────────────
+
+function $(id) { return document.getElementById(id); }
+
+function setHtml(id, html) {
+    const el = $(id);
+    if (el) el.innerHTML = html;
 }
 
-function fmtDate(isoStr) {
-  if (!isoStr) return null;
-  const s = isoStr.trim();
-  const d = new Date(s.includes('T') ? s : s.replace(' ', 'T'));
-  if (isNaN(d)) return isoStr.slice(0, 16).replace('T', ' ');
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-       + ' at ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+function setText(id, text) {
+    const el = $(id);
+    if (el) el.textContent = text;
 }
 
-function daysSince(isoStr) {
-  if (!isoStr) return Infinity;
-  const d = new Date(isoStr.includes('T') ? isoStr : isoStr.replace(' ', 'T'));
-  return (Date.now() - d) / (1000 * 60 * 60 * 24);
+function showEl(id)  { const el = $(id); if (el) el.style.display = ''; }
+function hideEl(id)  { const el = $(id); if (el) el.style.display = 'none'; }
+
+async function postJson(url, body) {
+    return fetch(url, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken() },
+        body:    JSON.stringify(body),
+    });
 }
 
-// ── Stats & status strip ───────────────────────────────────────
-async function loadStats() {
-  try {
-    const d = await fetch('/api/stats').then(r => r.json());
-    document.getElementById('stat-volumes').textContent = d.volumes ?? '—';
-    document.getElementById('stat-titles').textContent  = d.titles  ?? '—';
-    document.getElementById('admin-status').textContent =
-      d.last_scraped ? '漫画追跡システム — ' + d.last_scraped : '漫画追跡システム — never scraped';
-    if (d.titles) {
-      document.getElementById('hint-db-titles').textContent = `${d.titles} titles currently in DB`;
-      document.getElementById('ssc-titles').textContent     = d.titles;
-      document.getElementById('ssc-titles-sub').textContent = `${d.volumes} volume entries`;
+// ── Job polling ────────────────────────────────────────────────────────────────
+
+const _pollers = {};   // jobName → interval id
+
+function startPolling(jobName) {
+    if (_pollers[jobName]) return;
+    _setJobUi(jobName, true, 0, 'starting…');
+    _pollers[jobName] = setInterval(() => _pollOnce(jobName), POLL_INTERVAL);
+}
+
+async function _pollOnce(jobName) {
+    try {
+        const resp = await fetch(`/api/job/${jobName}`);
+        if (!resp.ok) return;
+        const { running, progress, message } = await resp.json();
+        _setJobUi(jobName, running, progress, message);
+        if (!running) {
+            clearInterval(_pollers[jobName]);
+            delete _pollers[jobName];
+            loadStats();
+            loadMissingCount();
+            loadHistory();
+        }
+    } catch { /* network blip — keep polling */ }
+}
+
+function _setJobUi(jobName, running, progress, message) {
+    // Progress bar
+    const bar = $(`progress-${jobName}`);
+    if (bar) {
+        bar.style.width   = `${progress}%`;
+        bar.style.display = running ? '' : 'none';
     }
-  } catch {}
+    // Status text
+    const st = $(`status-${jobName}`);
+    if (st) {
+        st.textContent = message || (running ? 'running…' : '');
+        st.className   = 'job-status-text ' + (running ? 'running' : (
+            message?.includes('error') ? 'error' : 'done'
+        ));
+    }
+    // Start / stop buttons
+    const startBtn = $(`start-btn-${jobName}`);
+    const stopBtn  = $(`stop-btn-${jobName}`);
+    if (startBtn) startBtn.disabled = running;
+    if (stopBtn)  stopBtn.style.display = running ? 'inline-flex' : 'none';
 }
+
+// ── Stop job ───────────────────────────────────────────────────────────────────
+
+async function stopJob(jobName) {
+    const resp = await postJson(`/api/job/stop/${jobName}`, {});
+    if (resp.ok) setText(`status-${jobName}`, 'stop signal sent…');
+}
+
+// ── Stats ──────────────────────────────────────────────────────────────────────
+
+async function loadStats() {
+    try {
+        const resp = await fetch('/api/stats');
+        if (!resp.ok) return;
+        const { volumes, titles, last_scraped } = await resp.json();
+        setText('stat-volumes',      volumes?.toLocaleString() ?? '—');
+        setText('stat-titles',       titles?.toLocaleString()  ?? '—');
+        setText('stat-last-scraped', last_scraped ?? '—');
+    } catch { /* ignore */ }
+}
+
+// ── Missing titles count ───────────────────────────────────────────────────────
 
 async function loadMissingCount() {
-  try {
-    const d = await fetch('/api/missing_titles').then(r => r.json());
-
-    const lcplScraped    = (d.total_titles || 0) - (d.count || 0);
-    const browardScraped = (d.total_titles || 0) - (d.broward_count || 0);
-
-    document.getElementById('ssc-lcpl-volumes').textContent    = lcplScraped;
-    document.getElementById('ssc-lcpl-missing').textContent    = d.count > 0 ? `${d.count} titles missing` : 'All titles scraped';
-    document.getElementById('ssc-broward-volumes').textContent = browardScraped;
-    document.getElementById('ssc-broward-missing').textContent = d.broward_count > 0 ? `${d.broward_count} titles missing` : 'All titles scraped';
-
-    document.getElementById('lcpl-scrape-hint').innerHTML =
-      d.count > 0 ? `<b>${d.count} titles</b> missing LCPL data` : 'All titles have LCPL data';
-    document.getElementById('broward-scrape-hint').innerHTML =
-      d.broward_count > 0 ? `<b>${d.broward_count} titles</b> missing Broward data` : 'All titles have Broward data';
-
-    updateStaleIndicators();
-  } catch {}
-}
-
-async function updateStaleIndicators() {
-  try {
-    const history = await fetch('/api/job_history').then(r => r.json());
-    const lastScrape  = history.find(h => h.job === 'scrape'         && h.status === 'done');
-    const lastBroward = history.find(h => h.job === 'scrape_broward' && h.status === 'done');
-
-    function applyStale(job, staleElId, hintElId) {
-      const staleEl = document.getElementById(staleElId);
-      const hintEl  = document.getElementById(hintElId);
-      if (hintEl) hintEl.querySelectorAll('.stale-appended').forEach(el => el.remove());
-
-      if (!job) {
-        staleEl.style.display = 'block';
-        staleEl.textContent   = 'Never scraped';
-        return;
-      }
-      const age   = daysSince(job.at);
-      const label = 'Last scraped ' + fmtDate(job.at);
-      if (hintEl) {
-        const span = document.createElement('span');
-        span.className   = 'stale-appended ' + (age > 3 ? 'stale' : '');
-        span.textContent = ' · ' + label;
-        hintEl.appendChild(span);
-      }
-      if (age > 7) {
-        staleEl.style.display = 'block';
-        staleEl.textContent   = `⚠ Scraped ${Math.floor(age)} days ago`;
-      }
-    }
-
-    applyStale(lastScrape,  'ssc-lcpl-stale',    'lcpl-scrape-hint');
-    applyStale(lastBroward, 'ssc-broward-stale', 'broward-scrape-hint');
-  } catch {}
-}
-
-loadStats();
-loadMissingCount();
-
-// ── Reset ──────────────────────────────────────────────────────
-function checkResetConfirm() {
-  document.getElementById('btn-reset').disabled =
-    document.getElementById('reset-confirm').value !== 'RESET';
-}
-
-async function doReset() {
-  const btn      = document.getElementById('btn-reset');
-  const resultEl = document.getElementById('reset-result');
-  btn.disabled        = true;
-  resultEl.textContent = 'Resetting…';
-  resultEl.style.color = 'var(--text3)';
-  try {
-    const form = new FormData();
-    form.append('csrf_token', getCsrf());
-    const d = await fetch('/admin/reset', { method: 'POST', body: form }).then(r => r.json());
-    resultEl.style.color = d.ok ? 'var(--green)' : 'var(--red)';
-    resultEl.textContent = (d.messages || ['Reset failed']).join(' · ');
-    if (d.ok) {
-      document.getElementById('reset-confirm').value = '';
-      loadStats();
-      loadMissingCount();
-      toast('Database reset complete', 'ok');
-      refreshHistory();
-    }
-  } catch(e) {
-    resultEl.style.color = 'var(--red)';
-    resultEl.textContent = 'Error: ' + e.message;
-  }
-}
-
-// ── Clear title availability ───────────────────────────────────
-let _lastClearedTitle   = null;
-let _lastClearedMangaID = null;
-
-async function deleteTitleResultsConfirmed() {
-  const title   = document.getElementById('del-results-title').value.trim();
-  const library = document.getElementById('del-results-lib').value;
-  if (!title) return;
-  if (!confirm(`Clear all availability data for "${title}"?`)) return;
-
-  const msgEl  = document.getElementById('del-results-msg');
-  const undoEl = document.getElementById('del-results-undo');
-  msgEl.style.color = 'var(--text3)';
-  msgEl.textContent = 'Clearing…';
-  undoEl.classList.remove('visible');
-
-  try {
-    const d = await fetch('/api/delete_title_results', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrf() },
-      body:    JSON.stringify({ title, library: library || null }),
-    }).then(r => r.json());
-
-    msgEl.style.color = d.ok ? 'var(--green)' : 'var(--red)';
-    msgEl.textContent = d.message;
-
-    if (d.ok) {
-      _lastClearedTitle   = title;
-      _lastClearedMangaID = d.manga_id;
-      document.getElementById('del-results-title-saved').textContent = title;
-      undoEl.classList.add('visible');
-      loadStats();
-      loadMissingCount();
-      setTimeout(() => undoEl.classList.remove('visible'), 15000);
-    }
-  } catch(e) {
-    msgEl.style.color = 'var(--red)';
-    msgEl.textContent = 'Error: ' + e.message;
-  }
-}
-
-async function undoClear() {
-  if (!_lastClearedTitle || !_lastClearedMangaID) return;
-  const title   = _lastClearedTitle;
-  const mangaID = _lastClearedMangaID;
-  document.getElementById('del-results-undo').classList.remove('visible');
-  await rescrapeById(mangaID, title, 'scrape');
-  await rescrapeById(mangaID, title, 'scrape_broward');
-  _lastClearedTitle   = null;
-  _lastClearedMangaID = null;
-}
-
-// ── Batch search + re-scrape ───────────────────────────────────
-let batchDebounce;
-async function batchSearch(q) {
-  clearTimeout(batchDebounce);
-  batchDebounce = setTimeout(async () => {
-    const el = document.getElementById('batch-results');
-    if (q.length < 2) {
-      el.innerHTML = '<div style="font-family:var(--mono);font-size:.7rem;color:var(--text3);padding:.6rem .75rem">Type to search</div>';
-      return;
-    }
     try {
-      const items = await fetch(`/api/suggestions?q=${encodeURIComponent(q)}`).then(r => r.json());
-      el.innerHTML = items.length
-        ? items.map(item => {
-            const safeTitle = item.title.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-            return `
-            <div class="batch-title-row">
-              <span class="batch-title-name">${item.title}</span>
-              <span class="batch-title-meta">${item.type || ''} ${item.score ? '· ★ ' + parseFloat(item.score).toFixed(2) : ''}</span>
-              <button onclick="clearBatchTitle(${item.manga_id}, '${safeTitle}')" class="danger" style="font-size:.6rem;padding:2px 7px;margin-left:6px">Clear</button>
-              <button onclick="rescrapeById(${item.manga_id}, '${safeTitle}', 'scrape')" class="btn-rescrape">↺ LCPL</button>
-              <button onclick="rescrapeById(${item.manga_id}, '${safeTitle}', 'scrape_broward')" class="btn-rescrape btn-rescrape-broward">↺ BCL</button>
-            </div>`;
-          }).join('')
-        : '<div style="font-family:var(--mono);font-size:.7rem;color:var(--text3);padding:.6rem .75rem">No results</div>';
-    } catch {}
-  }, 250);
+        const resp = await fetch('/api/missing_titles');
+        if (!resp.ok) return;
+        const { count, broward_count, total_titles } = await resp.json();
+        setText('missing-lcpl',    `${count} / ${total_titles} titles not yet scraped (LCPL)`);
+        setText('missing-broward', `${broward_count} / ${total_titles} titles not yet scraped (Broward)`);
+    } catch { /* ignore */ }
 }
 
-async function clearBatchTitle(mangaID, title) {
-  if (!confirm(`Clear all availability data for "${title}"?`)) return;
-  try {
-    const d = await fetch('/api/delete_title_results', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrf() },
-      body:    JSON.stringify({ manga_id: mangaID }),
-    }).then(r => r.json());
-    toast(d.message, d.ok ? 'ok' : 'err');
-    if (d.ok) { loadStats(); loadMissingCount(); }
-  } catch(e) { toast('Error: ' + e.message, 'err'); }
+// ── Job history ────────────────────────────────────────────────────────────────
+
+async function loadHistory() {
+    try {
+        const resp = await fetch('/api/job_history');
+        if (!resp.ok) return;
+        const entries = await resp.json();
+        const rows = entries.slice(0, 30).map(e => {
+            const at  = e.at ? new Date(e.at).toLocaleString() : '—';
+            const cls = e.status === 'error' ? 'hist-error' : (e.status === 'done' ? 'hist-done' : '');
+            return `<tr class="${cls}">
+                      <td class="hist-job">${e.job}</td>
+                      <td class="hist-status">${e.status}</td>
+                      <td class="hist-msg">${e.message || ''}</td>
+                      <td class="hist-at">${at}</td>
+                    </tr>`;
+        }).join('');
+        setHtml('history-tbody', rows || '<tr><td colspan="4">No history yet</td></tr>');
+    } catch { /* ignore */ }
 }
 
-async function rescrapeById(mangaID, title, action = 'scrape') {
-  try {
-    if (pollers[action]) { toast(`A ${action.replace(/_/g, ' ')} is already running`, 'err'); return; }
+// ── Branch stats chart ─────────────────────────────────────────────────────────
+// Rendered server-side as data attributes; JS draws the bars.
 
-    const form = new FormData();
-    form.append('action',     action);
-    form.append('manga_id',   mangaID);
-    form.append('csrf_token', getCsrf());
+function renderBranchChart() {
+    const container = $('branch-chart');
+    if (!container) return;
 
-    const btn     = document.getElementById('btn-' + action);
-    const stopBtn = document.getElementById('stop-' + action);
-    if (btn) btn.disabled = true;
-    if (stopBtn) stopBtn.style.display = 'inline-flex';
+    // Group bars by library (each .chart-group has data-max and .bar-row children)
+    container.querySelectorAll('.chart-group').forEach(group => {
+        const groupMax = parseInt(group.dataset.max, 10) || 1;
+        group.querySelectorAll('.bar-row').forEach(row => {
+            const count = parseInt(row.dataset.count, 10) || 0;
+            const pct   = Math.round((count / groupMax) * 100);
+            const bar   = row.querySelector('.bar-fill');
+            if (bar) bar.style.width = `${pct}%`;
+            const label = row.querySelector('.bar-pct');
+            if (label) label.textContent = `${pct}%`;
+        });
+    });
+}
 
-    const resp = await fetch('/admin', { method: 'POST', body: form }).then(r => r.json());
-    if (!resp.ok) {
-      toast(resp.message, 'err');
-      if (btn) btn.disabled = false;
-      if (stopBtn) stopBtn.style.display = 'none';
-      return;
+// ── Scrape form handling ───────────────────────────────────────────────────────
+
+async function submitScrapeForm(jobName) {
+    const form   = $(`form-${jobName}`);
+    const data   = new FormData(form);
+    const body   = Object.fromEntries(data.entries());
+    body.action  = jobName;
+
+    const resp = await postJson('/admin', body);
+    const json = await resp.json();
+
+    if (json.ok) {
+        startPolling(jobName);
+    } else {
+        setText(`status-${jobName}`, `⚠ ${json.message}`);
     }
-    toast(`Re-scraping "${title}" [${action === 'scrape_broward' ? 'Broward' : 'LCPL'}]…`, '');
-    showJob(action, 0, 'starting…');
-    updateStickyFooter(action, 0, 'starting…', true);
-    pollers[action] = setInterval(() => pollJob(action, btn, stopBtn), POLL_MS);
-  } catch(e) { toast('Re-scrape failed: ' + e.message, 'err'); }
 }
 
-// ── Job history ────────────────────────────────────────────────
-async function refreshHistory() {
-  try {
-    const items = await fetch('/api/job_history').then(r => r.json());
-    const list  = document.getElementById('history-list');
-    list.innerHTML = items.length
-      ? items.map(h => `
-          <div class="history-entry ${h.status === 'error' ? 'history-err' : 'history-ok'}">
-            <span class="history-icon">${h.status === 'error' ? '✗' : '✓'}</span>
-            <span class="history-job">${h.job}</span>
-            <span class="history-msg" title="${h.message}">${h.message}</span>
-            <span class="history-time">${fmtDate(h.at) || h.at.slice(0,16).replace('T',' ')}</span>
-          </div>`).join('')
-      : '<div style="font-family:var(--mono);font-size:.72rem;color:var(--text3);padding:.5rem 0">No history yet.</div>';
-    list.scrollTop = 0;
-  } catch {}
+// ── DB reset ───────────────────────────────────────────────────────────────────
+
+async function resetDatabase() {
+    if (!confirm('This will drop and recreate all tables. Are you sure?')) return;
+    const btn = $('reset-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Resetting…'; }
+
+    try {
+        const resp = await postJson('/admin/reset', {});
+        const json = await resp.json();
+        const msgs = (json.messages || [json.message || 'Unknown error']).join('\n');
+        alert(json.ok ? `✓ Done:\n${msgs}` : `✗ Error:\n${msgs}`);
+        if (json.ok) { loadStats(); loadMissingCount(); }
+    } catch (e) {
+        alert(`Network error: ${e.message}`);
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Reset Database'; }
+    }
 }
 
-// ── Sticky footer ──────────────────────────────────────────────
-const stickyFooter = document.getElementById('sticky-footer');
-let activeJobName  = null;
+// ── Delete title availability ──────────────────────────────────────────────────
 
-function updateStickyFooter(jobName, pct, msg, running) {
-  if (!running && activeJobName === jobName) {
-    stickyFooter.classList.remove('visible');
-    activeJobName = null;
-    return;
-  }
-  if (running) {
-    activeJobName = jobName;
-    stickyFooter.classList.add('visible');
-    document.getElementById('sf-job-name').textContent = jobName.toUpperCase().replace(/_/g, ' ');
-    document.getElementById('sf-bar').value  = pct;
-    document.getElementById('sf-pct').textContent = pct + '%';
-    document.getElementById('sf-msg').textContent  = msg;
-    document.getElementById('sf-stop-btn').onclick = () => stopJob(jobName);
-  }
-}
-
-// ── Job system ─────────────────────────────────────────────────
-const POLL_MS  = 1000;
-const pollers  = {};
-
-function startJob(evt, jobName) {
-  evt.preventDefault();
-  const btn     = document.getElementById('btn-' + jobName);
-  const stopBtn = document.getElementById('stop-' + jobName);
-  if (pollers[jobName]) return false;
-  btn.disabled = true;
-  if (stopBtn) stopBtn.style.display = 'inline-flex';
-  fetch('/admin', { method: 'POST', body: new FormData(evt.target) })
-    .then(r => {
-      if (r.status === 401 || r.status === 302) throw new Error('session_expired');
-      return r.json();
-    })
-    .then(d => {
-      if (!d.ok) {
-        toast(d.message, 'err');
-        btn.disabled = false;
-        if (stopBtn) stopBtn.style.display = 'none';
-        return;
-      }
-      showJob(jobName, 0, 'starting…');
-      updateStickyFooter(jobName, 0, 'starting…', true);
-      pollers[jobName] = setInterval(() => pollJob(jobName, btn, stopBtn), POLL_MS);
-    })
-    .catch(e => {
-      if (e.message === 'session_expired') {
-        document.getElementById('session-' + jobName)?.classList.add('visible');
-      } else {
-        toast('Failed: ' + e.message, 'err');
-      }
-      btn.disabled = false;
-      if (stopBtn) stopBtn.style.display = 'none';
+async function deleteTitleResults(mangaId, libraryId) {
+    if (!confirm(`Clear availability for ID ${mangaId}?`)) return;
+    const resp = await postJson('/api/delete_title_results', {
+        manga_id: mangaId,
+        library:  libraryId || null,
     });
-  return false;
+    const json = await resp.json();
+    if (json.ok) {
+        const row = document.querySelector(`[data-manga-id="${mangaId}"]`);
+        row?.remove();
+        loadMissingCount();
+    } else {
+        alert(`Error: ${json.message}`);
+    }
 }
 
-function stopJob(jobName) {
-  fetch('/api/job/stop/' + jobName, { method: 'POST' })
-    .then(r => r.json())
-    .then(d => toast(d.message, d.ok ? '' : 'err'))
-    .catch(() => {});
-}
+// ── Init ───────────────────────────────────────────────────────────────────────
 
-function pollJob(jobName, btn, stopBtn) {
-  fetch('/api/job/' + jobName)
-    .then(r => {
-      if (r.status === 401) throw new Error('session_expired');
-      return r.json();
-    })
-    .then(d => {
-      if (!d || !Object.keys(d).length) return;
-      const isErr = (d.message || '').startsWith('error');
-      showJob(jobName, d.progress || 0, d.message || '', isErr);
-      updateStickyFooter(jobName, d.progress || 0, d.message || '', d.running);
-      if (!d.running) {
-        clearInterval(pollers[jobName]);
-        delete pollers[jobName];
-        if (btn)     btn.disabled = false;
-        if (stopBtn) stopBtn.style.display = 'none';
-        if (!isErr) {
-          toast(jobName.replace(/_/g,' ') + ' complete', 'ok');
-          loadStats();
-          loadMissingCount();
-        } else {
-          toast('Error in ' + jobName + ': ' + d.message, 'err');
-        }
-        setTimeout(() => { hideJob(jobName); refreshHistory(); }, 3000);
-      }
-    })
-    .catch(e => {
-      if (e.message === 'session_expired') {
-        clearInterval(pollers[jobName]);
-        delete pollers[jobName];
-        document.getElementById('session-' + jobName)?.classList.add('visible');
-        if (btn)     btn.disabled = false;
-        if (stopBtn) stopBtn.style.display = 'none';
-      }
+document.addEventListener('DOMContentLoaded', () => {
+    loadStats();
+    loadMissingCount();
+    loadHistory();
+    renderBranchChart();
+
+    // Resume polling for any jobs that were already running before page load
+    JOB_NAMES.forEach(name => {
+        fetch(`/api/job/${name}`)
+            .then(r => r.ok ? r.json() : null)
+            .then(data => { if (data?.running) startPolling(name); })
+            .catch(() => {});
     });
-}
 
-function showJob(jobName, pct, msg, isError = false) {
-  const box = document.getElementById('job-' + jobName);
-  if (!box) return;
-  box.classList.add('visible');
-  box.classList.toggle('error', isError);
-  box.classList.toggle('done', !isError && pct >= 100);
-  document.getElementById('job-' + jobName + '-bar').value = pct;
-  document.getElementById('job-' + jobName + '-pct').textContent = pct + '%';
-  const m = document.getElementById('job-' + jobName + '-msg');
-  m.textContent = msg;
-  m.title       = msg;
-}
-
-function hideJob(jobName) {
-  document.getElementById('job-' + jobName)?.classList.remove('visible','done','error','busy');
-}
-
-// ── Restore running jobs on load ───────────────────────────────
-['get_manga','scrape','scrape_broward'].forEach(j => {
-  fetch('/api/job/' + j)
-    .then(r => {
-      if (r.status === 401) throw new Error('session_expired');
-      return r.json();
-    })
-    .then(d => {
-      if (d && d.running) {
-        const btn     = document.getElementById('btn-' + j);
-        const stopBtn = document.getElementById('stop-' + j);
-        showJob(j, d.progress || 0, d.message || '');
-        updateStickyFooter(j, d.progress || 0, d.message || '', true);
-        if (btn)     btn.disabled = true;
-        if (stopBtn) stopBtn.style.display = 'inline-flex';
-        pollers[j] = setInterval(() => pollJob(j, btn, stopBtn), POLL_MS);
-      }
-    })
-    .catch(e => {
-      if (e.message === 'session_expired')
-        document.getElementById('session-' + j)?.classList.add('visible');
-    });
+    setInterval(loadStats,        STATS_INTERVAL);
+    setInterval(loadMissingCount, MISSING_INTERVAL);
+    setInterval(loadHistory,      STATS_INTERVAL);
 });
+
+// JOB_NAMES is injected into the page by admin.html as a small inline JSON blob
+// so this module doesn't need to hardcode them:
+//   <script>const JOB_NAMES = {{ job_names | tojson }};</script>
+// That tiny inline script is acceptable — it's data, not logic.
