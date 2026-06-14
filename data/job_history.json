@@ -1114,5 +1114,29 @@
     "status": "error",
     "message": "stopped",
     "at": "2026-06-13T23:50:04.287877+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "no books to write",
+    "at": "2026-06-14T00:18:54.465953+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-14T00:20:01.217396+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 31 LCPL availability rows",
+    "at": "2026-06-14T00:21:21.237042+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "done",
+    "message": "[*] Done.",
+    "at": "2026-06-14T00:21:32.793244+00:00"
   }
 ]

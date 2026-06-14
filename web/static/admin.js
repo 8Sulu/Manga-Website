@@ -221,54 +221,44 @@ async function deleteTitleResults(mangaId, libraryId) {
 
 // ── Find & Re-scrape Title ─────────────────────────────────────────────────────
 
-let _rescrapeSelected = null;
+let _rescrapeSelected = null;   // { manga_id, title }
 let _rescrapeTimer    = null;
-
-// Create dropdown once at body level — fully outside all stacking contexts
-const _dd = document.createElement('div');
-_dd.id = 'rescrape-dropdown';
-_dd.className = 'rescrape-dropdown';
-_dd.style.display = 'none';
-document.body.appendChild(_dd);
-
-function _positionDropdown() {
-    const input = $('rescrape-search');
-    if (!input) return;
-    const r = input.getBoundingClientRect();
-    _dd.style.top   = `${r.bottom + window.scrollY + 3}px`;
-    _dd.style.left  = `${r.left   + window.scrollX}px`;
-    _dd.style.width = `${r.width}px`;
-}
 
 async function rescrapeSearch(q) {
     clearTimeout(_rescrapeTimer);
-    if (q.length < 2) { _dd.style.display = 'none'; return; }
+    const dropdown = $('rescrape-dropdown');
+    if (q.length < 2) { dropdown.style.display = 'none'; return; }
 
     _rescrapeTimer = setTimeout(async () => {
         try {
             const resp = await fetch(`/api/suggestions?q=${encodeURIComponent(q)}`);
             if (!resp.ok) return;
             const results = await resp.json();
-            if (!results.length) { _dd.style.display = 'none'; return; }
+            if (!results.length) { dropdown.style.display = 'none'; return; }
 
-            _dd.innerHTML = results.map(r =>
-                `<div class="rescrape-option"
-                      onclick="rescrapeSelect(${r.manga_id}, ${JSON.stringify(r.title)})">
+            dropdown.innerHTML = results.map(r =>
+                `<div class="rescrape-option" data-id="${r.manga_id}" data-title="${r.title.replace(/"/g,'&quot;')}"
+                      onclick="rescrapeSelect(${r.manga_id}, this.dataset.title)">
                    <span class="rescrape-opt-title">${r.title}</span>
                    <span class="rescrape-opt-meta">${r.type} · ID ${r.manga_id}${r.score ? ' · ★' + r.score : ''}</span>
                  </div>`
             ).join('');
 
-            _positionDropdown();
-            _dd.style.display = 'block';
+            // Position fixed dropdown under the input using screen coords
+            const input = $('rescrape-search');
+            const rect  = input.getBoundingClientRect();
+            dropdown.style.top   = `${rect.bottom + 3}px`;
+            dropdown.style.left  = `${rect.left}px`;
+            dropdown.style.width = `${rect.width}px`;
+            dropdown.style.display = 'block';
         } catch { /* ignore */ }
     }, 250);
 }
 
 function rescrapeSelect(mangaId, title) {
     _rescrapeSelected = { manga_id: mangaId, title };
-    _dd.style.display = 'none';
-    $('rescrape-search').value            = '';
+    $('rescrape-dropdown').style.display = 'none';
+    $('rescrape-search').value           = '';
     $('rescrape-title-label').textContent = title;
     $('rescrape-id-badge').textContent    = `ID ${mangaId}`;
     $('rescrape-selected').style.display  = '';
@@ -277,10 +267,10 @@ function rescrapeSelect(mangaId, title) {
 
 function rescrapeClear() {
     _rescrapeSelected = null;
-    $('rescrape-search').value            = '';
-    $('rescrape-selected').style.display  = 'none';
-    $('rescrape-btns').style.display      = 'none';
-    _dd.style.display                     = 'none';
+    $('rescrape-search').value           = '';
+    $('rescrape-selected').style.display = 'none';
+    $('rescrape-btns').style.display     = 'none';
+    $('rescrape-dropdown').style.display = 'none';
 }
 
 async function rescrapeSelected(jobName) {
@@ -288,28 +278,26 @@ async function rescrapeSelected(jobName) {
     const { manga_id, title } = _rescrapeSelected;
 
     const body = new FormData();
-    body.append('action',     jobName);
-    body.append('manga_id',   String(manga_id));
+    body.append('action',   jobName);
+    body.append('manga_id', String(manga_id));
     body.append('csrf_token', csrfToken());
 
     const resp = await fetch('/admin', { method: 'POST', body });
     const json = await resp.json();
     if (json.ok) {
         startPolling(jobName);
-        setText(`status-${jobName}`, `Re-scraping "${title}" (ID ${manga_id})…`);
+        setText(`status-${jobName}`,
+            `Re-scraping "${title}" (ID ${manga_id})…`);
     } else {
         alert(`⚠ ${json.message}`);
     }
 }
 
-// Reposition on scroll/resize so fixed coords stay accurate
-window.addEventListener('scroll', () => { if (_dd.style.display !== 'none') _positionDropdown(); }, { passive: true });
-window.addEventListener('resize', () => { if (_dd.style.display !== 'none') _positionDropdown(); }, { passive: true });
-
-// Close when clicking outside
+// Close dropdown when clicking outside
 document.addEventListener('click', e => {
-    if (!e.target.closest('#rescrape-card') && !e.target.closest('#rescrape-dropdown')) {
-        _dd.style.display = 'none';
+    if (!e.target.closest('#rescrape-card')) {
+        const dd = $('rescrape-dropdown');
+        if (dd) dd.style.display = 'none';
     }
 });
 

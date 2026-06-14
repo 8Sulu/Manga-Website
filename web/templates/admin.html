@@ -124,10 +124,11 @@
     <div class="admin-job-card" id="rescrape-card">
       <div class="admin-job-title">Find &amp; Re-scrape Title</div>
       <p class="admin-desc">Search by title, then re-scrape a single MangaID for LCPL and/or Broward.</p>
-      <div class="rescrape-search-wrap">
+      <div style="position:relative">
         <input class="admin-input" id="rescrape-search" type="text"
                placeholder="Search title…" autocomplete="off"
                oninput="rescrapeSearch(this.value)">
+        <div class="rescrape-dropdown" id="rescrape-dropdown" style="display:none"></div>
       </div>
       <div class="rescrape-selected" id="rescrape-selected" style="display:none">
         <span class="rescrape-title-label" id="rescrape-title-label"></span>

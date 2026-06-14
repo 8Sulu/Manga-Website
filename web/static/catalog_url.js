@@ -36,7 +36,6 @@ function _buildParams(title, author, isNovel) {
     p.append('qu', `TITLE="${title}"`);
     p.append('qu', `AUTHOR=${author}`);
     p.append('te', 'ILS');
-    p.append('lm', 'BOOKS');
     if (isNovel) {
         NOVEL_EXCLUSIONS.forEach(([k, v]) => p.append(k, v));
     }
@@ -44,7 +43,9 @@ function _buildParams(title, author, isNovel) {
 }
 
 export function buildLcplUrl(title, author, type_) {
-    return `${LCPL_BASE}?${_buildParams(title, author, _isNovel(type_))}`;
+    const p = _buildParams(title, author, _isNovel(type_));
+    p.append('lm', 'BOOKS');
+    return `${LCPL_BASE}?${p}`;
 }
 
 export function buildBrowardUrl(title, author, type_) {
