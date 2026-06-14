@@ -120,6 +120,27 @@
       <button id="reset-btn" class="btn danger" onclick="resetDatabase()">Reset Database</button>
     </div>
 
+    <!-- Find & re-scrape -->
+    <div class="admin-job-card" id="rescrape-card">
+      <div class="admin-job-title">Find &amp; Re-scrape Title</div>
+      <p class="admin-desc">Search by title, then re-scrape a single MangaID for LCPL and/or Broward.</p>
+      <div class="rescrape-search-wrap">
+        <input class="admin-input" id="rescrape-search" type="text"
+               placeholder="Search title…" autocomplete="off"
+               oninput="rescrapeSearch(this.value)">
+      </div>
+      <div class="rescrape-selected" id="rescrape-selected" style="display:none">
+        <span class="rescrape-title-label" id="rescrape-title-label"></span>
+        <span class="rescrape-id-badge" id="rescrape-id-badge"></span>
+      </div>
+      <div class="admin-btn-row" id="rescrape-btns" style="display:none">
+        <button class="btn primary" onclick="rescrapeSelected('scrape')">▶ Re-scrape LCPL</button>
+        <button class="btn primary" style="color:var(--amber);border-color:var(--amber)"
+                onclick="rescrapeSelected('scrape_broward')">▶ Re-scrape Broward</button>
+        <button class="btn" onclick="rescrapeClear()" title="Clear selection">✕</button>
+      </div>
+    </div>
+
   </div><!-- /.admin-two-col -->
 
   <!-- ── Branch stats chart ─────────────────────────────────────── -->

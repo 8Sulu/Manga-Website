@@ -1102,5 +1102,17 @@
     "status": "done",
     "message": "[*] Done.",
     "at": "2026-06-12T20:45:22.624438+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "no books to write",
+    "at": "2026-06-13T23:48:57.127933+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "error",
+    "message": "stopped",
+    "at": "2026-06-13T23:50:04.287877+00:00"
   }
 ]

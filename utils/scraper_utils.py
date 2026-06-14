@@ -146,10 +146,13 @@ _BRANCH_SHORT_MAP: list[tuple[str, str]] = [
 ]
 
 
-def branch_short(name: str) -> str:
+def branch_short(name: str, library_id: int | None = None, broward_library_id: int | None = None) -> str:
     """
     Return a short display label for a branch name, for use in compact vol chips.
-    Falls back to the first word of the name if nothing matches.
+
+    When library_id == broward_library_id, Broward-specific abbreviations are
+    preferred (longer names, more branches).  Falls back to the first word of
+    the name if nothing in the map matches.
     """
     lower = name.strip().lower()
     for key, label in _BRANCH_SHORT_MAP:
