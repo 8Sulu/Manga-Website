@@ -118,6 +118,7 @@ def admin_logout():
 
 @app.route('/admin', methods=['GET', 'POST'])
 @admin_required
+@csrf_protect
 def admin():
     if request.method == 'POST':
         return _handle_admin_post()
@@ -139,24 +140,18 @@ def admin():
 
 
 def _handle_admin_post():
-    token = (
-        request.form.get('csrf_token')
-        or (request.get_json(silent=True) or {}).get('csrf_token', '')
-        or request.headers.get('X-CSRF-Token', '')
-    )
-    if not secrets.compare_digest(token, _csrf_token()):
-        return jsonify({'ok': False, 'message': 'Invalid CSRF token'}), 403
-
-    action = request.form.get('action')
+    # Support both JSON body (postJson) and FormData (rescrapeSelected)
+    json_body = request.get_json(silent=True) or {}
+    action = request.form.get('action') or json_body.get('action')
 
     if action in ('scrape', 'scrape_broward'):
         return _start_scrape_job(action)
 
     if action == 'get_manga':
-        offset = request.form.get('offset', '0')
+        offset = json_body.get('offset', request.form.get('offset', '0'))
         try:
             offset = str(int(offset))
-        except ValueError:
+        except (ValueError, TypeError):
             return jsonify({'ok': False, 'message': 'Invalid offset'}), 400
         ok, status, msg = start_job(
             'get_manga',
@@ -204,7 +199,6 @@ def _start_scrape_job(action: str):
         cmd.extend(['--range', f'{lo}-{hi}'])
 
     def _on_scrape_done(job_name: str, ok: bool) -> None:
-        """Bust the missing-titles TTL cache immediately when a scrape finishes."""
         _invalidate_missing_cache()
 
     ok, status, msg = start_job(action, cmd, on_complete=_on_scrape_done)
@@ -215,15 +209,8 @@ def _start_scrape_job(action: str):
 
 @app.route('/admin/reset', methods=['POST'])
 @admin_required
+@csrf_protect
 def admin_reset():
-    token = (
-        request.form.get('csrf_token')
-        or (request.get_json(silent=True) or {}).get('csrf_token', '')
-        or request.headers.get('X-CSRF-Token', '')
-    )
-    if not secrets.compare_digest(token, _csrf_token()):
-        return jsonify({'ok': False, 'message': 'Invalid CSRF token'}), 403
-
     messages = []
     try:
         with get_db_connection() as conn:
@@ -258,10 +245,6 @@ def home():
 
 @app.route('/api/stats')
 def api_stats():
-    """
-    #14: Batch both COUNT queries into a single round-trip using a UNION.
-    Also pulls last-scraped from in-memory history (no file I/O).
-    """
     try:
         row = execute_query(
             """
@@ -275,7 +258,7 @@ def api_stats():
         titles  = row['titles']  if row else 0
 
         last_scraped = 'Never scraped'
-        for log in reversed(read_job_history()):   # already in-memory (#16)
+        for log in reversed(read_job_history()):
             if log['job'] in ('scrape', 'scrape_broward') and log['status'] == 'done':
                 try:
                     dt = datetime.fromisoformat(log['at'])
@@ -324,6 +307,7 @@ def api_job_status(name):
 
 @app.route('/api/job/stop/<name>', methods=['POST'])
 @admin_required
+@csrf_protect
 def api_job_stop(name):
     if name not in JOB_NAMES:
         return jsonify({'ok': False, 'message': 'unknown job'}), 400
@@ -338,21 +322,17 @@ def api_job_history():
     return jsonify(list(reversed(read_job_history()))[:50])
 
 
-# ── #13: Missing-titles cache (60s TTL) ───────────────────────────────────────
-# Avoids two full-table scans on every admin poll interval.
+# ── Missing-titles cache (60s TTL) ────────────────────────────────────────────
 
-_missing_cache: dict = {}          # { pattern: (timestamp, list[int]) }
-_MISSING_TTL   = 60                # seconds
+_missing_cache: dict = {}
+_MISSING_TTL   = 60
+
 
 def _invalidate_missing_cache() -> None:
     _missing_cache.clear()
 
+
 def _missing_manga_ids(library_pattern: str) -> list[int]:
-    """
-    Return MangaIDs that have no availability rows for the given library.
-    Result is cached for _MISSING_TTL seconds; call _invalidate_missing_cache()
-    after a scrape finishes to force a refresh.
-    """
     now = time.monotonic()
     cached = _missing_cache.get(library_pattern)
     if cached and (now - cached[0]) < _MISSING_TTL:
@@ -390,11 +370,8 @@ def api_missing_titles():
 
 @app.route('/api/delete_title_results', methods=['POST'])
 @admin_required
+@csrf_protect
 def api_delete_title_results():
-    token = request.headers.get('X-CSRF-Token', '')
-    if not secrets.compare_digest(token, _csrf_token()):
-        return jsonify({'ok': False, 'message': 'Invalid CSRF token'}), 403
-
     data     = request.get_json() or {}
     manga_id = data.get('manga_id')
     lib_id   = data.get('library')
@@ -447,15 +424,13 @@ def api_title_volumes(manga_id):
         return jsonify({'error': str(e)}), 500
 
 
-# ── MAL proxy — #15: background job so the request thread isn't blocked ────────
+# ── MAL proxy — background job so the request thread isn't blocked ─────────────
 
-# job state: { 'status': 'running'|'done'|'error', 'data': dict|None, 'message': str }
 _mal_jobs:      dict[str, dict] = {}
 _mal_jobs_lock: threading.Lock  = threading.Lock()
 
 
 def _mal_fetch_worker(job_id: str, access_token_init: str) -> None:
-    """Background thread: fetch all pages of the user's MAL manga list."""
     import requests as _req
 
     access_token = access_token_init
@@ -524,10 +499,6 @@ def _mal_fetch_worker(job_id: str, access_token_init: str) -> None:
 
 @app.route('/api/mal/mangalist')
 def api_mal_mangalist():
-    """
-    #15: Start a background thread to fetch the MAL list and return a job_id.
-    The client polls /api/mal/mangalist/status/<job_id> until done.
-    """
     ip = client_ip()
     if rate_limited(f'mal:{ip}', limit=10, window=60):
         return jsonify({'ok': False, 'message': 'Rate limited'}), 429
@@ -548,7 +519,6 @@ def api_mal_mangalist():
 
 @app.route('/api/mal/mangalist/status/<job_id>')
 def api_mal_mangalist_status(job_id: str):
-    """Poll endpoint for the MAL fetch background job."""
     with _mal_jobs_lock:
         job = _mal_jobs.get(job_id)
 
@@ -559,12 +529,10 @@ def api_mal_mangalist_status(job_id: str):
         return jsonify({'ok': True, 'status': 'running'})
 
     if job['status'] == 'error':
-        # Clean up finished jobs
         with _mal_jobs_lock:
             _mal_jobs.pop(job_id, None)
         return jsonify({'ok': False, 'status': 'error', 'message': job['message']}), 502
 
-    # done — return data and clean up
     data = job['data']
     with _mal_jobs_lock:
         _mal_jobs.pop(job_id, None)
@@ -604,14 +572,7 @@ def api_mal_clear_filter():
     return jsonify({'ok': True})
 
 
-# ── Search — #12: SQL aggregation + server-side sort ──────────────────────────
-
-# Valid server-side sort keys → SQL ORDER BY clause fragments
-_SORT_MAP = {
-    'score': 'grouped.Score DESC, grouped.Title ASC',
-    'title': 'grouped.Title ASC',
-    # avail and vols are computed in Python; fall back to default for those
-}
+# ── Search ─────────────────────────────────────────────────────────────────────
 
 @app.route('/search')
 def search():
@@ -663,8 +624,6 @@ def search():
         mal_filters=session.get('mal_filters'),
     )
 
-    # ── Server-side sort (#12 / sort-across-pages) ────────────────────────────
-    # Applied after filtering so page slices are consistent regardless of page.
     sort_dir = request.args.get('sort_dir', 'desc').strip()
     reverse  = (sort_dir != 'asc')
 
@@ -674,7 +633,7 @@ def search():
         grouped.sort(key=lambda r: r['avail_count'], reverse=reverse)
     elif sort_key == 'vols':
         grouped.sort(key=lambda r: r['vol_count'], reverse=reverse)
-    else:  # default: score
+    else:
         grouped.sort(key=lambda r: float(r['Score'] or 0), reverse=reverse)
 
     page     = request.args.get('page',     1,  type=int)

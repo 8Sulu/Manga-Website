@@ -15,7 +15,7 @@
   <header class="page-header">
     <a href="/" class="back-link">← Public search</a>
     <span class="sep">|</span>
-    <span class="hero-eyebrow">Admin dashboard</span>
+    <span class="page-label">Admin dashboard</span>
     <a href="/admin/logout" class="back-link" style="margin-left:auto">Log out</a>
   </header>
 
@@ -149,7 +149,6 @@
   <div class="admin-section-title">Holdings by branch</div>
   <div id="branch-chart" class="branch-chart">
     {% set ns = namespace(cur_lib='', group_max=0) %}
-    {# Compute per-library maxes first #}
     {% set lib_maxes = {} %}
     {% for row in manga_per_library %}
       {% if row.LibraryName not in lib_maxes %}
@@ -192,7 +191,6 @@
 
 </div><!-- /.shell -->
 
-<!-- Job names as data — tiny inline, no logic (#6 note) -->
 <script>const JOB_NAMES = {{ ['scrape', 'scrape_broward', 'get_manga'] | tojson }};</script>
 <script src="{{ url_for('static', filename='admin.js') }}" defer></script>
 </body>

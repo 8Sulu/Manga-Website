@@ -41,7 +41,7 @@ ILSWS_BASE       = "https://lcpl.sirsi.net/lcpl_ilsws/rest/standard/lookupTitleI
 RESULTS_PER_PAGE = 12
 REQUEST_DELAY    = 0.5
 MAX_RETRIES      = 3
-DB_BATCH_SIZE    = 20   # commit to DB after every N titles
+DB_BATCH_SIZE    = 20
 
 
 # ── HTTP session ──────────────────────────────────────────────────────────────
@@ -271,8 +271,6 @@ def scrape(
         while True:
             page_keys = fetch_catalog_keys(session, title, author, manga_type, page)
             log.info(f"  Search page {page}: {len(page_keys)} catalog keys")
-
-            new_keys = sum(1 for k in page_keys if k not in catalog_keys)
             catalog_keys.update({k: v for k, v in page_keys.items() if k not in catalog_keys})
 
             if len(page_keys) < RESULTS_PER_PAGE:
@@ -325,7 +323,6 @@ def write_to_db(books: list) -> str:
         return "error: LCPL library not found in DB — run a DB reset first"
     lcpl_library_id = row[0]
 
-    # ── Delete old data for all affected titles up-front ─────────────────────
     manga_ids    = list({b["manga_id"] for b in books})
     placeholders = ",".join(["%s"] * len(manga_ids))
 
@@ -342,20 +339,16 @@ def write_to_db(books: list) -> str:
         WHERE a.MangaID IN ({placeholders}) AND bas.AvailabilityID IS NULL
     """, tuple(manga_ids))
 
-    # Commit the deletes first so we don't hold locks during the slow insert loop
     conn.commit()
 
     scraped_at = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
 
     inserted    = skipped     = 0
-    batch_rows  = 0           # rows since last commit
-    manga_batch = 0           # titles since last commit
-
-    # Group books by manga_id so we can count title boundaries
+    batch_rows  = 0
+    manga_batch = 0
     current_manga_id: int | None = None
 
     for b in books:
-        # Detect title boundary for batch-size counting
         if b["manga_id"] != current_manga_id:
             current_manga_id = b["manga_id"]
             manga_batch += 1
@@ -381,13 +374,11 @@ def write_to_db(books: list) -> str:
                 skipped += 1
                 log.warning(f"  Unknown branch key '{branch_key}' — not in BRANCH_MAPPING")
 
-        # ── Batch commit every DB_BATCH_SIZE titles ───────────────────────────
         if manga_batch >= DB_BATCH_SIZE:
             conn.commit()
             print(f"  [DB] committed batch ({manga_batch} titles, {batch_rows} rows)", flush=True)
             manga_batch = batch_rows = 0
 
-    # ── Final commit ──────────────────────────────────────────────────────────
     if batch_rows > 0:
         conn.commit()
         print(f"  [DB] final commit ({manga_batch} titles, {batch_rows} rows)", flush=True)

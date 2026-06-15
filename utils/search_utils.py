@@ -4,9 +4,6 @@ utils/search_utils.py
 Assembles raw DB rows from the /search query into the structured list of
 result dicts consumed by results.html.
 
-Extracting this from the Flask route handler means the transformation logic
-is independently testable and keeps backend.py focused on HTTP concerns.
-
 Exports:
     build_results(rows, lcpl_library_id, broward_library_id,
                   avail_filter, no_vol1, mal_data, mal_filters)
@@ -16,7 +13,6 @@ from __future__ import annotations
 
 from utils.format_utils import fmt_scraped_at
 from utils.scraper_utils import STATUS_PRIORITY, branch_short, normalize_status
-from utils.url_builders import broward_search_url, lcpl_search_url
 
 
 def build_results(
@@ -68,7 +64,6 @@ def build_results(
 
         td = titles_map[t]
 
-        # Track the most-recent ScrapedAt across all volumes for this title
         row_scraped = r.get('ScrapedAt')
         if row_scraped is not None:
             if td['scraped_at'] is None or row_scraped > td['scraped_at']:
@@ -105,7 +100,6 @@ def build_results(
     grouped: list[dict] = []
 
     for td in titles_map.values():
-        # Compute cross-library volume status summary
         volume_best: dict[int, str] = {}
         has_vol1 = False
 
@@ -123,17 +117,14 @@ def build_results(
         out_count   = sum(1 for s in volume_best.values()
                           if s not in ('Available', 'On Hold'))
 
-        # ── Availability filter ───────────────────────────────────────────────
         if avail_filter == 'available' and avail_count == 0:
             continue
         if avail_filter == 'out' and out_count == 0:
             continue
 
-        # ── Vol-1 filter ──────────────────────────────────────────────────────
         if no_vol1 == '1' and not has_vol1:
             continue
 
-        # ── MAL filter ────────────────────────────────────────────────────────
         if mal_data and mal_filters:
             include_statuses = [k for k, v in mal_filters.items() if v == 'include']
             exclude_statuses = [k for k, v in mal_filters.items() if v == 'exclude']
@@ -146,7 +137,6 @@ def build_results(
                 if user_status in exclude_statuses:
                     continue
 
-        # ── Build per-library vol/branch breakdown ────────────────────────────
         lib_list: list[dict] = []
 
         for linfo in sorted(td['lib_data'].values(), key=lambda x: x['library_id']):
@@ -193,18 +183,14 @@ def build_results(
                 'vol_list':     vol_list,
             })
 
-        manga_type = td.get('Type', '')
-        author     = td.get('author', '')
-        title_str  = td['Title']
-
         grouped.append({
             'MangaID':     td['MangaID'],
-            'Title':       title_str,
+            'Title':       td['Title'],
             'Volumes':     td['Volumes'],
-            'Type':        manga_type,
+            'Type':        td.get('Type', ''),
             'Members':     td['Members'],
             'Score':       td['Score'],
-            'author':      author,
+            'author':      td.get('author', ''),
             'cover':       td['cover'],
             'has_lcpl':    td['has_lcpl'],
             'has_broward': td['has_broward'],
@@ -213,9 +199,6 @@ def build_results(
             'avail_count': avail_count,
             'out_count':   out_count,
             'hold_count':  hold_count,
-            'lcpl_url':    lcpl_search_url(title_str, author, manga_type),
-            'broward_url': broward_search_url(title_str, author, manga_type),
-            'is_novel':    (manga_type or '').lower().replace(' ', '-') in {'light-novel', 'novel'},
             'scraped_at':  fmt_scraped_at(td.get('scraped_at')),
         })
 

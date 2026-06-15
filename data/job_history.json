@@ -1138,5 +1138,59 @@
     "status": "done",
     "message": "[*] Done.",
     "at": "2026-06-14T00:21:32.793244+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "error",
+    "message": "stopped",
+    "at": "2026-06-14T23:58:54.100483+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "error",
+    "message": "mysql.connector.errors.DatabaseError: 1205 (HY000): Lock wait timeout exceeded; try restarting transaction",
+    "at": "2026-06-15T00:00:01.339134+00:00"
+  },
+  {
+    "job": "scrape_broward",
+    "status": "error",
+    "message": "  [DB] inserted 14 avail + 16 branch rows",
+    "at": "2026-06-15T00:02:29.882488+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 32 LCPL availability rows",
+    "at": "2026-06-15T00:11:43.513182+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 32 LCPL availability rows",
+    "at": "2026-06-15T00:13:56.632348+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 32 LCPL availability rows",
+    "at": "2026-06-15T00:17:19.249157+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 32 LCPL availability rows",
+    "at": "2026-06-15T00:23:37.427866+00:00"
+  },
+  {
+    "job": "reset",
+    "status": "done",
+    "message": "✓ Schema recreated · ✓ manga.csv · ✓ libraries.csv · ✓ branches.csv",
+    "at": "2026-06-15T00:39:50.774032+00:00"
+  },
+  {
+    "job": "scrape",
+    "status": "done",
+    "message": "inserted 32 LCPL availability rows",
+    "at": "2026-06-15T00:40:20.920177+00:00"
   }
 ]
