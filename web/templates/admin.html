@@ -44,15 +44,11 @@
   <!-- ── Two-column job area ────────────────────────────────────── -->
   <div class="admin-two-col">
 
-    <!-- LCPL scraper -->
     <div class="admin-job-card">
       <div class="admin-job-title">Leon County (LCPL)</div>
       <form id="form-scrape" onsubmit="event.preventDefault();submitScrapeForm('scrape')">
-        <label class="admin-label">Range (e.g. 1–50, blank = all)
-          <input class="admin-input" name="range" type="text" placeholder="1-50">
-        </label>
-        <label class="admin-label">Single MangaID
-          <input class="admin-input" name="manga_id" type="text" placeholder="21">
+        <label class="admin-label">Range (e.g. 1–50) <span style="color:var(--red)">*Required</span>
+          <input class="admin-input" name="range" type="text" placeholder="1-50" required>
         </label>
         <label class="admin-checkbox">
           <input type="checkbox" name="only_new" value="1"> Only scrape missing titles
@@ -69,15 +65,11 @@
       <div class="job-status-text" id="status-scrape"></div>
     </div>
 
-    <!-- Broward scraper -->
     <div class="admin-job-card">
       <div class="admin-job-title">Broward County (BCL)</div>
       <form id="form-scrape_broward" onsubmit="event.preventDefault();submitScrapeForm('scrape_broward')">
-        <label class="admin-label">Range (e.g. 1–50, blank = all)
-          <input class="admin-input" name="range" type="text" placeholder="1-50">
-        </label>
-        <label class="admin-label">Single MangaID
-          <input class="admin-input" name="manga_id" type="text" placeholder="21">
+        <label class="admin-label">Range (e.g. 1–50) <span style="color:var(--red)">*Required</span>
+          <input class="admin-input" name="range" type="text" placeholder="1-50" required>
         </label>
         <label class="admin-checkbox">
           <input type="checkbox" name="only_new" value="1"> Only scrape missing titles
@@ -93,7 +85,6 @@
       </div>
       <div class="job-status-text" id="status-scrape_broward"></div>
     </div>
-
     <!-- get_manga job -->
     <div class="admin-job-card">
       <div class="admin-job-title">Update manga list (MAL)</div>

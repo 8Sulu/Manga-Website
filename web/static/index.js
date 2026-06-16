@@ -1,6 +1,6 @@
 /**
  * static/index.js — Home page JS
- * Handles stats display, typeahead search, and filter pill toggles.
+ * Stats display, typeahead search, and filter pill toggles.
  */
 
 // ── Stats ──────────────────────────────────────────────────────────────────────
@@ -8,8 +8,9 @@
 async function loadStats() {
   try {
     const d = await fetch('/api/stats').then(r => r.json());
-    document.getElementById('stat-volumes').textContent = d.volumes?.toLocaleString() ?? '—';
-    document.getElementById('stat-titles').textContent  = d.titles?.toLocaleString()  ?? '—';
+    const fmt = n => (n != null ? Number(n).toLocaleString() : '—');
+    document.getElementById('stat-volumes').textContent = fmt(d.volumes);
+    document.getElementById('stat-titles').textContent  = fmt(d.titles);
   } catch {}
 }
 
@@ -23,10 +24,8 @@ let debounce, activeIdx = -1, lastQuery = '';
 
 function highlight(text, query) {
   if (!query) return text;
-  return text.replace(
-    new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'),
-    '<em>$1</em>',
-  );
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return text.replace(new RegExp(`(${escaped})`, 'gi'), '<em>$1</em>');
 }
 
 async function fetchSuggestions(q) {
@@ -61,14 +60,11 @@ function closeDropdown() { dropdown.classList.remove('open'); activeIdx = -1; }
 
 function navigateTo(title) {
   const p = new URLSearchParams({ title });
-  const vals = {
-    type:    document.getElementById('f-type').value,
-    branch:  document.getElementById('f-branch').value,
-    avail:   document.getElementById('f-avail').value,
-    library: document.getElementById('f-library').value,
-    no_vol1: document.getElementById('f-no-vol1').value,
-  };
-  Object.entries(vals).forEach(([k, v]) => { if (v) p.set(k, v); });
+  const hidden = { type: 'f-type', branch: 'f-branch', avail: 'f-avail', library: 'f-library', no_vol1: 'f-no-vol1' };
+  Object.entries(hidden).forEach(([k, id]) => {
+    const v = document.getElementById(id)?.value;
+    if (v) p.set(k, v);
+  });
   window.location.href = '/search?' + p.toString();
 }
 

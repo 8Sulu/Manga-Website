@@ -391,29 +391,27 @@ def write_to_db(books: list) -> str:
         msg += f" ({skipped} branch keys unrecognized — check BRANCH_MAPPING in settings.py)"
     return msg
 
-
-# ── Entry point ───────────────────────────────────────────────────────────────
-
 if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Leon County Public Library manga scraper")
-    parser.add_argument("--debug",     action="store_true", help="Write raw ILSWS JSON to debug/")
-    parser.add_argument("--range",     type=str, help="Scrape a range of titles (e.g. 1-50)")
-    parser.add_argument("--manga-ids", type=lambda s: [int(x) for x in s.split(",")],
-                        metavar="ID,ID", help="Comma-separated MangaIDs")
+    parser.add_argument("--debug", action="store_true", help="Write raw ILSWS JSON to debug/")
+    
+    # Force the user/app to explicitly choose either a range OR a manga_id for rescraping
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--range", type=str, help="Scrape a range of titles (e.g. 1-50)")
+    group.add_argument("--manga-ids", type=lambda s: [int(x) for x in s.split(",")],
+                        metavar="ID,ID", help="Comma-separated MangaIDs for rescraping")
     args = parser.parse_args()
 
     if args.manga_ids:
         books = scrape(manga_ids=args.manga_ids, debug=args.debug)
-    elif args.range:
+    else:
         try:
             lo, hi = args.range.split("-")
-            books  = scrape(start=max(1, int(lo)), end=int(hi), debug=args.debug)
+            books = scrape(start=max(1, int(lo)), end=int(hi), debug=args.debug)
         except (ValueError, IndexError):
             print("Invalid --range format. Use START-END (e.g. --range 1-50)")
             raise SystemExit(1)
-    else:
-        books = scrape(debug=args.debug)
 
     print(write_to_db(books))

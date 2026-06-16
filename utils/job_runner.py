@@ -43,7 +43,7 @@ JOB_NAMES: frozenset[str] = frozenset({'scrape', 'scrape_broward', 'get_manga'})
 # How long (seconds) with no stdout output before the watchdog kills the job.
 # Import errors / early crashes typically produce nothing then the process dies,
 # but a truly silent hang (e.g. waiting on a socket) should also be caught.
-STDOUT_TIMEOUT: int = 120
+STDOUT_TIMEOUT: int = 300
 
 
 # ── In-memory job state ────────────────────────────────────────────────────────

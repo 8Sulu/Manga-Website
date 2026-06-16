@@ -165,38 +165,47 @@ def _handle_admin_post():
 def _start_scrape_job(action: str):
     is_broward  = action == 'scrape_broward'
     script      = 'broward_scraper.py' if is_broward else 'leon_scraper.py'
-    lib_pattern = '%Broward%'          if is_broward else '%Leon%'
+    lib_pattern = '%Broward%' if is_broward else '%Leon%'
 
-    range_str = request.form.get('range', '').strip()
-    manga_id  = request.form.get('manga_id', '').strip()
-    only_new  = request.form.get('only_new') == '1'
+    # Safely extract variables from EITHER a JSON payload or standard Form Data
+    json_body = request.get_json(silent=True) or {}
+    
+    range_str = (request.form.get('range') or json_body.get('range', '')).strip()
+    manga_id  = (request.form.get('manga_id') or json_body.get('manga_id', '')).strip()
+    only_new  = (request.form.get('only_new') or json_body.get('only_new')) == '1'
 
     cmd = [sys.executable, str(SCRIPTS_DIR / script)]
 
     if manga_id:
+        # Used exclusively by the "Find & Re-scrape Title" UI
         cmd.extend(['--manga-ids', manga_id])
-
-    elif only_new:
-        missing_ids = _missing_manga_ids(lib_pattern)
-        if not missing_ids:
-            label = 'Broward' if is_broward else 'LCPL'
-            return jsonify({'ok': False, 'message': f'All titles already have {label} data'}), 400
-
-        if range_str:
-            lo, hi    = parse_range_str(range_str, _titles_count())
-            all_ids   = [r['MangaID'] for r in execute_query(
-                'SELECT MangaID FROM manga ORDER BY MangaID'
-            )]
+        
+    elif range_str:
+        # Used by the main job cards
+        lo, hi = parse_range_str(range_str, _titles_count())
+        
+        if only_new:
+            missing_ids = _missing_manga_ids(lib_pattern)
+            if not missing_ids:
+                label = 'Broward' if is_broward else 'LCPL'
+                return jsonify({'ok': False, 'message': f'All titles already have {label} data'}), 400
+                
+            # Filter the missing IDs to ONLY include those inside the requested range
+            all_ids   = [r['MangaID'] for r in execute_query('SELECT MangaID FROM manga ORDER BY MangaID')]
             valid_ids = set(all_ids[lo - 1:hi])
             missing_ids = [m for m in missing_ids if m in valid_ids]
+            
             if not missing_ids:
-                return jsonify({'ok': False, 'message': f'No new titles in range {range_str}'}), 400
-
-        cmd.extend(['--manga-ids', ','.join(map(str, missing_ids))])
-
-    elif range_str:
-        lo, hi = parse_range_str(range_str, _titles_count())
-        cmd.extend(['--range', f'{lo}-{hi}'])
+                return jsonify({'ok': False, 'message': f'No new titles missing in range {range_str}'}), 400
+                
+            # Pass the precise list of missing IDs to the scraper
+            cmd.extend(['--manga-ids', ','.join(map(str, missing_ids))])
+        else:
+            # Standard range scrape
+            cmd.extend(['--range', f'{lo}-{hi}'])
+    else:
+        # Fails safely if it genuinely receives no target
+        return jsonify({'ok': False, 'message': 'A range is required to start a bulk scrape.'}), 400
 
     def _on_scrape_done(job_name: str, ok: bool) -> None:
         _invalidate_missing_cache()
@@ -204,6 +213,7 @@ def _start_scrape_job(action: str):
     ok, status, msg = start_job(action, cmd, on_complete=_on_scrape_done)
     print(f'\n{cmd}\n')
     return jsonify({'ok': ok, 'message': msg}), status
+
 
 # ── Admin reset ────────────────────────────────────────────────────────────────
 

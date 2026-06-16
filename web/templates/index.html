@@ -10,34 +10,49 @@
 </head>
 <body>
 <div class="grid-bg"></div>
-<div style="position:relative;z-index:1">
+<div class="portal-wrap">
 
-  <div class="portal-hero">
-    <div class="portal-eyebrow">Leon County &amp; Broward County Libraries</div>
-    <h1 class="portal-title">Manga<span class="accent">.</span><br>Find It Here</h1>
+  <!-- ── Hero ─────────────────────────────────────────────────── -->
+  <section class="portal-hero">
+    <div class="portal-eyebrow">
+      Leon County &amp; Broward County Libraries
+    </div>
+
+    <h1 class="portal-title">
+      Find your<br><span class="accent">manga</span> here
+    </h1>
+
     <p class="portal-sub">漫画コレクション — search availability across both library systems</p>
 
+    <!-- Stats -->
     <div class="portal-stats">
       <div class="pstat">
         <span class="pstat-val" id="stat-volumes">—</span>
         <span class="pstat-lbl">Entries tracked</span>
       </div>
+      <div class="pstat-divider"></div>
       <div class="pstat">
         <span class="pstat-val" id="stat-titles">—</span>
         <span class="pstat-lbl">Titles</span>
       </div>
+      <div class="pstat-divider"></div>
       <div class="pstat">
         <span class="pstat-val">2</span>
         <span class="pstat-lbl">Libraries</span>
       </div>
     </div>
 
-    <form id="search-form" action="/search" method="get"
-          style="width:100%;display:flex;flex-direction:column;align-items:center;gap:0">
+    <!-- Search form -->
+    <form id="search-form" action="/search" method="get" class="search-form">
       <div class="search-wrap">
-        <div class="search-input-row">
+        <div class="search-box">
+          <span class="search-icon">
+            <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+              <path d="M10 6.5a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0zm-.662 3.045a4.5 4.5 0 1 1 .707-.707l2.559 2.56-.708.706-2.558-2.56z" fill="currentColor"/>
+            </svg>
+          </span>
           <input type="text" name="title" id="search-input"
-                 placeholder="Search title… e.g. Berserk, Frieren"
+                 placeholder="Search title… e.g. Berserk, Frieren, One Piece"
                  autocomplete="off" spellcheck="false">
           <button type="submit" class="search-go-btn">Search</button>
         </div>
@@ -51,113 +66,122 @@
         <input type="hidden" name="no_vol1" id="f-no-vol1">
       </div>
 
+      <!-- Filter strip -->
       <div class="filter-strip">
         <div class="filter-selects">
-          <select class="filter-select" id="sel-type"
-                  onchange="document.getElementById('f-type').value=this.value">
-            <option value="">All types</option>
-            <option>Manga</option>
-            <option value="Light Novel">Light Novel</option>
-            <option>Novel</option>
-            <option>Manhwa</option>
-            <option>Manhua</option>
-          </select>
-          <select class="filter-select" id="sel-branch"
-                  onchange="document.getElementById('f-branch').value=this.value">
-            <option value="">All branches</option>
-            <optgroup label="Leon County (LCPL)">
-              <option value="Leroy Collins Leon County Main Public Library">Main — Leroy Collins</option>
-              <option value="Bruce J. Host Northeast Branch Library">Northeast — Bruce</option>
-              <option value="Lake Jackson Branch Library">Lake Jackson</option>
-              <option value="Eastside Branch Library">Eastside</option>
-              <option value="Dr BL Perry Jr Branch Library">Dr BL Perry</option>
-              <option value="Woodville Branch Library">Woodville</option>
-              <option value="Jane G. Sauls Fort Braden Branch Library">Fort Braden</option>
-            </optgroup>
-            <optgroup label="Broward County (BCL)">
-              <option value="Main Library">Main Library (Fort Lauderdale)</option>
-              <option value="Northwest Regional Library">NW Regional (Coral Springs)</option>
-              <option value="North Regional/Broward College Library">N Regional/BC (Coconut Creek)</option>
-              <option value="South Regional/Broward College Library">S Regional/BC (Pembroke Pines)</option>
-              <option value="Southwest Regional Library">SW Regional (Pembroke Pines)</option>
-              <option value="West Regional Library">W Regional (Plantation)</option>
-              <option value="Hollywood Branch">Hollywood</option>
-              <option value="Pompano Beach Library &amp; Cultural Center">Pompano Beach</option>
-              <option value="Miramar Branch Library &amp; Education Center">Miramar</option>
-              <option value="Weston Branch">Weston</option>
-              <option value="Tamarac Branch">Tamarac</option>
-              <option value="Sunrise Dan Pearl Branch">Sunrise</option>
-              <option value="Margate Catharine Young Branch">Margate</option>
-              <option value="Deerfield Beach Percy White Branch">Deerfield Beach</option>
-              <option value="Hallandale Beach Branch">Hallandale Beach</option>
-              <option value="Davie/Cooper City Branch">Davie / Cooper City</option>
-              <option value="African American Research Library &amp; Cultural Center">AARLCC (Fort Lauderdale)</option>
-              <option value="Lauderhill Central Park Library">Lauderhill Central Park</option>
-              <option value="Lauderhill Towne Centre Branch">Lauderhill Towne Centre</option>
-              <option value="Lauderdale Lakes Library/Educational &amp; Cultural Center">Lauderdale Lakes</option>
-              <option value="Pembroke Pines/Walter C. Young Resource Center">Pembroke Pines / Walter Young</option>
-              <option value="North Lauderdale Saraniero Branch">North Lauderdale</option>
-              <option value="Imperial Point Branch">Imperial Point</option>
-              <option value="Carver Ranches Branch">Carver Ranches (West Park)</option>
-              <option value="Century Plaza/Leon Slatin Branch">Century Plaza / Leon Slatin</option>
-              <option value="Dania Beach Paul DeMaio Branch">Dania Beach</option>
-              <option value="Hollywood Beach Bernice P. Oster Branch">Hollywood Beach</option>
-              <option value="Riverland Branch">Riverland (Fort Lauderdale)</option>
-              <option value="Beach Branch">Beach (Pompano Beach)</option>
-              <option value="Jan Moran Collier City Learning Library">Jan Moran Collier City</option>
-              <option value="Fort Lauderdale Reading Center">Fort Lauderdale Reading Center</option>
-              <option value="Galt Ocean Mile Reading Center">Galt Ocean Mile</option>
-              <option value="Tyrone Bryant Branch">Tyrone Bryant (Fort Lauderdale)</option>
-              <option value="Northwest Branch">Northwest Branch (Pompano Beach)</option>
-              <option value="Marta,Beth Friedman Stirling Road Branch">Stirling Road (Hollywood)</option>
-              <option value="Nova Southeastern University Alvin Sherman Library">NSU Alvin Sherman Library</option>
-            </optgroup>
-          </select>
+          <div class="filter-select-wrap">
+            <select class="filter-select" id="sel-type"
+                    onchange="document.getElementById('f-type').value=this.value">
+              <option value="">All types</option>
+              <option>Manga</option>
+              <option value="Light Novel">Light Novel</option>
+              <option>Novel</option>
+              <option>Manhwa</option>
+              <option>Manhua</option>
+            </select>
+          </div>
+          <div class="filter-select-wrap">
+            <select class="filter-select" id="sel-branch"
+                    onchange="document.getElementById('f-branch').value=this.value">
+              <option value="">All branches</option>
+              <optgroup label="Leon County (LCPL)">
+                <option value="Leroy Collins Leon County Main Public Library">Main — Leroy Collins</option>
+                <option value="Bruce J. Host Northeast Branch Library">Northeast — Bruce</option>
+                <option value="Lake Jackson Branch Library">Lake Jackson</option>
+                <option value="Eastside Branch Library">Eastside</option>
+                <option value="Dr BL Perry Jr Branch Library">Dr BL Perry</option>
+                <option value="Woodville Branch Library">Woodville</option>
+                <option value="Jane G. Sauls Fort Braden Branch Library">Fort Braden</option>
+              </optgroup>
+              <optgroup label="Broward County (BCL)">
+                <option value="Main Library">Main Library (Fort Lauderdale)</option>
+                <option value="Northwest Regional Library">NW Regional (Coral Springs)</option>
+                <option value="North Regional/Broward College Library">N Regional/BC (Coconut Creek)</option>
+                <option value="South Regional/Broward College Library">S Regional/BC (Pembroke Pines)</option>
+                <option value="Southwest Regional Library">SW Regional (Pembroke Pines)</option>
+                <option value="West Regional Library">W Regional (Plantation)</option>
+                <option value="Hollywood Branch">Hollywood</option>
+                <option value="Pompano Beach Library &amp; Cultural Center">Pompano Beach</option>
+                <option value="Miramar Branch Library &amp; Education Center">Miramar</option>
+                <option value="Weston Branch">Weston</option>
+                <option value="Tamarac Branch">Tamarac</option>
+                <option value="Sunrise Dan Pearl Branch">Sunrise</option>
+                <option value="Margate Catharine Young Branch">Margate</option>
+                <option value="Deerfield Beach Percy White Branch">Deerfield Beach</option>
+                <option value="Hallandale Beach Branch">Hallandale Beach</option>
+                <option value="Davie/Cooper City Branch">Davie / Cooper City</option>
+                <option value="African American Research Library &amp; Cultural Center">AARLCC (Fort Lauderdale)</option>
+                <option value="Lauderhill Central Park Library">Lauderhill Central Park</option>
+                <option value="Lauderhill Towne Centre Branch">Lauderhill Towne Centre</option>
+                <option value="Lauderdale Lakes Library/Educational &amp; Cultural Center">Lauderdale Lakes</option>
+                <option value="Pembroke Pines/Walter C. Young Resource Center">Pembroke Pines / Walter Young</option>
+                <option value="North Lauderdale Saraniero Branch">North Lauderdale</option>
+                <option value="Imperial Point Branch">Imperial Point</option>
+                <option value="Carver Ranches Branch">Carver Ranches (West Park)</option>
+                <option value="Century Plaza/Leon Slatin Branch">Century Plaza / Leon Slatin</option>
+                <option value="Dania Beach Paul DeMaio Branch">Dania Beach</option>
+                <option value="Hollywood Beach Bernice P. Oster Branch">Hollywood Beach</option>
+                <option value="Riverland Branch">Riverland (Fort Lauderdale)</option>
+                <option value="Beach Branch">Beach (Pompano Beach)</option>
+                <option value="Jan Moran Collier City Learning Library">Jan Moran Collier City</option>
+                <option value="Fort Lauderdale Reading Center">Fort Lauderdale Reading Center</option>
+                <option value="Galt Ocean Mile Reading Center">Galt Ocean Mile</option>
+                <option value="Tyrone Bryant Branch">Tyrone Bryant (Fort Lauderdale)</option>
+                <option value="Northwest Branch">Northwest Branch (Pompano Beach)</option>
+                <option value="Marta,Beth Friedman Stirling Road Branch">Stirling Road (Hollywood)</option>
+                <option value="Nova Southeastern University Alvin Sherman Library">NSU Alvin Sherman Library</option>
+              </optgroup>
+            </select>
+          </div>
         </div>
 
+        <!-- Pills -->
         <div class="pill-row" id="filter-pills">
-          <!-- Availability group -->
           <a class="pill-btn pill-all active" href="#" data-group="avail" data-val="">Any status</a>
-          <a class="pill-btn pill-avail"      href="#" data-group="avail" data-val="available">🟢 Available now</a>
+          <a class="pill-btn pill-avail"      href="#" data-group="avail" data-val="available">🟢 Available</a>
           <a class="pill-btn pill-out"        href="#" data-group="avail" data-val="out">🔴 Checked out</a>
 
-          <span class="pill-group-sep" aria-hidden="true">|</span>
+          <span class="pill-sep" aria-hidden="true"></span>
 
-          <!-- Library group -->
-          <a class="pill-btn pill-all active" href="#" data-group="library" data-val="">Both libraries</a>
-          <a class="pill-btn pill-lcpl"        href="#" data-group="library" data-val="{{ LCPL_LIBRARY_ID }}">🟢 Leon County</a>
-          <a class="pill-btn pill-broward"     href="#" data-group="library" data-val="{{ BROWARD_LIBRARY_ID }}">🟡 Broward</a>
+          <a class="pill-btn pill-all active" href="#" data-group="library" data-val="">Both</a>
+          <a class="pill-btn pill-lcpl"       href="#" data-group="library" data-val="{{ LCPL_LIBRARY_ID }}">🟢 LCPL</a>
+          <a class="pill-btn pill-broward"    href="#" data-group="library" data-val="{{ BROWARD_LIBRARY_ID }}">🟡 Broward</a>
 
-          <span class="pill-group-sep" aria-hidden="true">|</span>
+          <span class="pill-sep" aria-hidden="true"></span>
 
-          <!-- Vol 1 toggle -->
           <a class="pill-btn pill-vol1" href="#" data-group="no_vol1" data-val="1"
-             title="Only show titles where volume 1 is in the library">📚 Has vol. 1</a>
+             title="Only show titles where volume 1 is available">📚 Has vol. 1</a>
         </div>
       </div>
     </form>
-  </div>
+  </section>
 
-  <div class="shell about-card" style="padding-bottom:5rem">
-    <div class="card">
-      <div class="section-label">About the collection</div>
-      <p style="font-family:var(--mono);font-size:.78rem;color:var(--text2);line-height:1.8">
-        Tracks manga across <strong style="color:var(--green)">Leon County Public Library</strong> (7 branches · per-volume status)
-        and <strong style="color:var(--amber)">Broward County Library</strong> (title-level availability).
-        Data sourced from MyAnimeList rankings and each library's catalog API.
-      </p>
-      <p style="font-family:var(--mono);font-size:.78rem;color:var(--text2);line-height:1.8;margin-top:.75rem">
-        Pipeline controls and collection management live on the
-        <a href="/admin" style="color:var(--purple)">Admin Dashboard</a>.
-      </p>
+  <!-- ── About ──────────────────────────────────────────────── -->
+  <section class="about-section shell">
+    <div class="about-grid">
+      <div class="about-card">
+        <div class="about-card-icon">🟢</div>
+        <div class="about-card-title">Leon County</div>
+        <div class="about-card-desc">7 branches · per-volume, per-branch availability via the SirsiDynix REST API</div>
+      </div>
+      <div class="about-card">
+        <div class="about-card-icon">🟡</div>
+        <div class="about-card-title">Broward County</div>
+        <div class="about-card-desc">37 branches · title-level availability sourced from the catalog AJAX flow</div>
+      </div>
+      <div class="about-card">
+        <div class="about-card-icon">★</div>
+        <div class="about-card-title">MyAnimeList</div>
+        <div class="about-card-desc">Rankings, scores, cover art, and reading-list filtering via OAuth2</div>
+      </div>
     </div>
 
-    <div style="padding-top:1rem;display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--border)">
+    <div class="about-footer">
       <span class="deco-jp">漫画追跡システム</span>
-      <a href="/admin" style="font-family:var(--mono);font-size:.6rem;color:var(--text3);opacity:.4;transition:opacity .2s"
-         onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.4">Admin ↗</a>
+      <a href="/admin" class="about-admin-link">Admin dashboard ↗</a>
     </div>
-  </div>
+  </section>
+
 </div>
 
 <script src="{{ url_for('static', filename='index.js') }}"></script>

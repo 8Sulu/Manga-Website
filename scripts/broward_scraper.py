@@ -425,15 +425,13 @@ def process_batch(args: argparse.Namespace) -> None:
     if args.manga_ids:
         target_ids = set(args.manga_ids)
         pairs = [p for p in all_pairs if p[3] in target_ids]
-    elif args.range:
+    else:
         try:
             s, e  = args.range.split("-")
             pairs = all_pairs[max(0, int(s) - 1):int(e)]
         except (ValueError, IndexError):
             print("[-] Invalid --range. Use START-END (e.g. --range 1-50)")
             return
-    else:
-        pairs = all_pairs
 
     if not pairs:
         print("[-] No valid titles matched the criteria.")
@@ -480,11 +478,12 @@ def process_batch(args: argparse.Namespace) -> None:
             print("  [-] Warning: no sdcsrf token — availability lookups may fail.")
 
         item_copies: list[tuple[int, list[dict]]] = []
-        for item in items:
+        for j, item in enumerate(items, 1):
+            print(f"  [{j}/{len(items)}] fetching item {item['item_id']} (vol {item['volume']})", flush=True)
             copies = fetch_item_availability(
                 http_session, item["item_id"], item["index"],
                 title, author, sdcsrf, args.debug,
-            )
+            )    
             item_copies.append((item["volume"], copies))
             if csv_writer:
                 for c in copies:
@@ -555,18 +554,14 @@ def process_batch(args: argparse.Namespace) -> None:
         csv_file.close()
     print("\n[*] Done.")
 
-
-# ── Entry point ───────────────────────────────────────────────────────────────
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Broward County Library manga scraper")
     parser.add_argument("--debug",  action="store_true", help="Verbose URL/copy logging")
     parser.add_argument("--output", type=str,            help="Also write results to CSV")
 
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument("--range",     type=str,
-                       help="Title range (e.g. 1-50)")
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--range",     type=str, help="Title range (e.g. 1-50)")
     group.add_argument("--manga-ids", type=lambda s: [int(x) for x in s.split(",")],
-                       metavar="ID,ID", help="Comma-separated MangaIDs")
+                       metavar="ID,ID", help="Comma-separated MangaIDs for rescraping")
 
     process_batch(parser.parse_args())

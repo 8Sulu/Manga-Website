@@ -11,29 +11,30 @@
 <body>
 <div class="shell">
 
+  <!-- ── Page header ────────────────────────────────────────────── -->
   <header class="page-header">
-    <a href="/" class="back-link">← Back to search</a>
+    <a href="/" class="back-link">← Search</a>
     <span class="sep">|</span>
-    <span class="hero-eyebrow">Search results</span>
+    <span class="hero-eyebrow">Results</span>
   </header>
 
   <!-- ── MAL panel ──────────────────────────────────────────────── -->
   <div class="mal-panel {{ 'open' if mal_loaded }}" id="mal-panel">
-    <div class="mal-toggle-row" onclick="toggleMalPanel()">
+    <button class="mal-toggle-row" onclick="toggleMalPanel()" type="button">
       <span class="mal-title">Filter by MAL list</span>
-      {% if mal_active %}<span class="mal-active-badge">⚠ filter active</span>{% endif %}
-      {% if not mal_loaded %}<span class="mal-hint">Load to filter results</span>{% endif %}
+      {% if mal_active %}<span class="mal-active-badge">filter active</span>{% endif %}
+      {% if not mal_loaded %}<span class="mal-hint-inline">Load to filter by your reading status</span>{% endif %}
       <span class="mal-chevron">▶</span>
-    </div>
+    </button>
     <div class="mal-body">
       <div class="mal-header">
-        <span class="mal-loading" id="mal-loading" style="display:none">Loading…</span>
+        <span class="mal-loading" id="mal-loading" style="display:none">Fetching MAL list…</span>
         <span class="mal-error"   id="mal-error"   style="display:none"></span>
         {% if not mal_loaded %}
-          <button class="mal-load-btn" id="mal-load-btn" onclick="loadMalList()">Load my MAL list</button>
+          <button class="btn primary mal-load-btn" id="mal-load-btn" onclick="loadMalList()" type="button">Load my MAL list</button>
         {% else %}
-          <button class="mal-apply-btn" id="mal-apply-btn" onclick="applyMalFilters()">Apply</button>
-          <button class="mal-clear-btn" onclick="clearMalFilter()">✕ Clear</button>
+          <button class="btn primary mal-apply-btn" id="mal-apply-btn" onclick="applyMalFilters()" type="button" style="display:none">Apply filters</button>
+          <button class="btn mal-clear-btn" onclick="clearMalFilter()" type="button">✕ Clear</button>
         {% endif %}
       </div>
       {% if mal_loaded %}
@@ -43,26 +44,22 @@
                                ('on_hold','On Hold'),('dropped','Dropped'),
                                ('plan_to_read','Plan to Read')] %}
           {% set state = mal_filters.get(key, '') %}
-          <div class="mal-status-item" data-status="{{ key }}" data-state="{{ state }}"
-               onclick="toggleMalStatus('{{ key }}', this)">
+          <button class="mal-status-item" data-status="{{ key }}" data-state="{{ state }}"
+               onclick="toggleMalStatus('{{ key }}', this)" type="button">
             <span class="mal-status-icon">{{ icons.get(state, '◦') }}</span>
             <span>{{ label }}</span>
-          </div>
+          </button>
         {% endfor %}
       </div>
-      <div class="mal-hint-text">
+      <p class="mal-hint-text">
         Click once to <span class="hint-green">✓ include only</span>,
         twice to <span class="hint-red">✕ exclude</span>,
-        three times to reset · hit <b>Apply</b> to filter.
-        {% if mal_active %}<span class="hint-amber">⚠ Filter active</span>{% endif %}
-      </div>
+        three times to clear · then hit <b>Apply filters</b>.
+        {% if mal_active %}<span class="hint-amber">⚠ Filter is active</span>{% endif %}
+      </p>
       {% else %}
       <div class="mal-status-row" id="mal-status-row">
-        <span class="mal-hint">Click "Load my MAL list" to filter results by your reading status.</span>
-      </div>
-      <div class="mal-hint-text">
-        Click once to <span class="hint-green">✓ include only</span>,
-        twice to <span class="hint-red">✕ exclude</span>, three times to reset.
+        <span class="mal-hint-inline" style="padding:.5rem 0">Load your MAL list to filter results by reading status.</span>
       </div>
       {% endif %}
     </div>
@@ -72,26 +69,61 @@
   <div class="results-bar">
     <div class="results-count-big" id="results-count">
       {%- if total_pages > 1 -%}
-        {{ (page-1)*per_page + 1 }}–{{ (page-1)*per_page + results|length }} of
-        {{ count }} title{{ 's' if count != 1 }}
+        {{ (page-1)*per_page + 1 }}–{{ (page-1)*per_page + results|length }}
+        <span class="results-of">of {{ count }} title{{ 's' if count != 1 }}</span>
       {%- else -%}
         {{ count }} title{{ 's' if count != 1 }}
       {%- endif -%}
     </div>
     <div class="sort-btns">
-      <button class="sort-btn" id="sort-score" onclick="sortCards('score')">Score</button>
-      <button class="sort-btn" id="sort-title" onclick="sortCards('title')">A–Z</button>
-      <button class="sort-btn" id="sort-avail" onclick="sortCards('avail')">Available</button>
-      <button class="sort-btn" id="sort-vols"  onclick="sortCards('vols')">Volumes</button>
+      <span class="sort-label">Sort:</span>
+      <button class="sort-btn" id="sort-score" onclick="sortCards('score')" type="button">Score</button>
+      <button class="sort-btn" id="sort-title" onclick="sortCards('title')" type="button">A–Z</button>
+      <button class="sort-btn" id="sort-avail" onclick="sortCards('avail')" type="button">Available</button>
+      <button class="sort-btn" id="sort-vols"  onclick="sortCards('vols')"  type="button">Volumes</button>
     </div>
   </div>
 
-  <!-- ── base_qs: all current params except 'page', for pagination links ── -->
+  <!-- ── base_qs: all current params except 'page' ── -->
   {%- set base_qs -%}
     {%- for k, v in request.args.items() -%}
       {%- if k != 'page' -%}&{{ k }}={{ v | urlencode }}{%- endif -%}
     {%- endfor -%}
   {%- endset -%}
+
+  <!-- ── Library filter pills ────────────────────────────────────── -->
+  <div class="lib-filter-row" id="lib-filter-row">
+    <a class="lib-filter-pill pill-all {{ 'active' if not filters.library }}"
+       href="#" data-val="">All libraries</a>
+    <a class="lib-filter-pill pill-lcpl {{ 'active' if filters.library == LCPL_LIBRARY_ID|string }}"
+       href="#" data-val="{{ LCPL_LIBRARY_ID }}">🟢 Leon County (LCPL)</a>
+    <a class="lib-filter-pill pill-broward {{ 'active' if filters.library == BROWARD_LIBRARY_ID|string }}"
+       href="#" data-val="{{ BROWARD_LIBRARY_ID }}">🟡 Broward County (BCL)</a>
+  </div>
+
+  <!-- ── Active filter chips ─────────────────────────────────────── -->
+  {% if has_filters %}
+  <div class="filter-chips">
+    {% if filters.title  %}<div class="fchip">title: {{ filters.title }}<button class="fchip-x" onclick="removeFilter('title')" type="button">✕</button></div>{% endif %}
+    {% if filters.type   %}<div class="fchip">type: {{ filters.type }}<button class="fchip-x" onclick="removeFilter('type')" type="button">✕</button></div>{% endif %}
+    {% if filters.branch %}<div class="fchip">branch: {{ filters.branch.split(' ')[0] }}<button class="fchip-x" onclick="removeFilter('branch')" type="button">✕</button></div>{% endif %}
+    {% if filters.library %}
+    <div class="fchip {{ 'fchip-green' if filters.library == LCPL_LIBRARY_ID|string else 'fchip-amber' }}">
+      {{ 'LCPL' if filters.library == LCPL_LIBRARY_ID|string else 'Broward' }}
+      <button class="fchip-x" onclick="removeFilter('library')" type="button">✕</button>
+    </div>
+    {% endif %}
+    {% if filters.avail %}
+    <div class="fchip {{ 'fchip-green' if filters.avail == 'available' else 'fchip-red' }}">
+      {{ 'Available now' if filters.avail == 'available' else 'Checked out' }}
+      <button class="fchip-x" onclick="removeFilter('avail')" type="button">✕</button>
+    </div>
+    {% endif %}
+    {% if filters.no_vol1 == '1' %}
+    <div class="fchip fchip-green">Has vol. 1<button class="fchip-x" onclick="removeFilter('no_vol1')" type="button">✕</button></div>
+    {% endif %}
+  </div>
+  {% endif %}
 
   <!-- ── Top pagination ──────────────────────────────────────────── -->
   {% if total_pages > 1 %}
@@ -113,48 +145,14 @@
       {% endif %}
       {% if page < total_pages %}<a class="pg-btn" href="/search?page={{ page+1 }}{{ base_qs }}">Next →</a>
       {% else %}<span class="pg-btn disabled">Next →</span>{% endif %}
-      <span class="pg-info">page {{ page }} of {{ total_pages }}</span>
+      <span class="pg-info">{{ page }} / {{ total_pages }}</span>
     </div>
-  {% endif %}
-
-  <!-- ── Library filter pills ────────────────────────────────────── -->
-  <div class="lib-filter-row" id="lib-filter-row">
-    <a class="lib-filter-pill pill-all {{ 'active' if not filters.library }}" href="#" data-val="">All libraries</a>
-    <a class="lib-filter-pill pill-lcpl {{ 'active' if filters.library == LCPL_LIBRARY_ID|string }}"
-       href="#" data-val="{{ LCPL_LIBRARY_ID }}">🟢 Leon County (LCPL)</a>
-    <a class="lib-filter-pill pill-broward {{ 'active' if filters.library == BROWARD_LIBRARY_ID|string }}"
-       href="#" data-val="{{ BROWARD_LIBRARY_ID }}">🟡 Broward County (BCL)</a>
-  </div>
-
-  <!-- ── Active filter chips ─────────────────────────────────────── -->
-  {% if has_filters %}
-  <div class="filter-chips">
-    {% if filters.title  %}<div class="fchip">title: {{ filters.title }}<button class="fchip-x" onclick="removeFilter('title')">✕</button></div>{% endif %}
-    {% if filters.type   %}<div class="fchip">type: {{ filters.type }}<button class="fchip-x" onclick="removeFilter('type')">✕</button></div>{% endif %}
-    {% if filters.branch %}<div class="fchip">branch: {{ filters.branch.split(' ')[0] }}<button class="fchip-x" onclick="removeFilter('branch')">✕</button></div>{% endif %}
-    {% if filters.library %}
-    <div class="fchip {{ 'tl-avail' if filters.library == LCPL_LIBRARY_ID|string else 'tl-hold' }}">
-      {{ 'LCPL' if filters.library == LCPL_LIBRARY_ID|string else 'Broward' }}
-      <button class="fchip-x" onclick="removeFilter('library')">✕</button>
-    </div>
-    {% endif %}
-    {% if filters.avail %}
-    <div class="fchip {{ 'tl-avail' if filters.avail == 'available' else 'tl-out' }}">
-      {{ 'Available now' if filters.avail == 'available' else 'Checked out' }}
-      <button class="fchip-x" onclick="removeFilter('avail')">✕</button>
-    </div>
-    {% endif %}
-    {% if filters.no_vol1 == '1' %}
-    <div class="fchip tl-avail">Has vol. 1<button class="fchip-x" onclick="removeFilter('no_vol1')">✕</button></div>
-    {% endif %}
-  </div>
   {% endif %}
 
   <!-- ── Results grid ─────────────────────────────────────────────── -->
   {% if results %}
   <div class="results-grid" id="results-grid">
     {% for r in results %}
-    {# data-author and data-type are read by JS to build catalog URLs lazily on expand #}
     <div class="manga-card"
          data-score="{{ r.Score or 0 }}"
          data-title="{{ r.Title | e }}"
@@ -165,6 +163,7 @@
          data-manga-id="{{ r.MangaID }}"
          onclick="toggleCard(this)">
 
+      <!-- Cover -->
       <div class="manga-cover" style="{{ r.MangaID | cover_gradient }}">
         {% if r.cover %}
         <img src="{{ r.cover }}" alt="{{ r.Title | e }}"
@@ -176,35 +175,37 @@
         {% if r.Score %}<span class="cover-score">★ {{ r.Score }}</span>{% endif %}
       </div>
 
-      <!-- compact body -->
+      <!-- Compact body -->
       <div class="manga-body">
         <div class="manga-card-title">{{ r.Title }}</div>
         <div class="manga-card-meta">
-          {{ r.Type }} · {{ r.vol_count }} of {{ r.Volumes or '?' }} vol{{ 's' if r.Volumes != 1 else '' }}
+          {{ r.Type }} · {{ r.vol_count }} / {{ r.Volumes or '?' }} vol{{ 's' if r.Volumes != 1 else '' }}
         </div>
         <div class="tl-row">
           {% if r.avail_count %}<span class="tl-chip tl-avail"><span class="tl-dot"></span>{{ r.avail_count }} available</span>{% endif %}
           {% if r.out_count   %}<span class="tl-chip tl-out"><span class="tl-dot"></span>{{ r.out_count }} out</span>{% endif %}
           {% if r.hold_count  %}<span class="tl-chip tl-hold"><span class="tl-dot"></span>{{ r.hold_count }} on hold</span>{% endif %}
         </div>
-        <div class="lib-badge-row">
+        <div class="card-footer-row">
           {% if r.has_lcpl    %}<span class="lib-badge lcpl">LCPL</span>{% endif %}
           {% if r.has_broward %}<span class="lib-badge broward">BCL</span>{% endif %}
           {% if r.scraped_at  %}<span class="scraped-at-badge">↻ {{ r.scraped_at }}</span>{% endif %}
         </div>
       </div>
 
-      <!-- expanded body — catalog links are href="#" until _injectCatalogLinks runs -->
+      <!-- Expanded body -->
       <div class="manga-body expanded-body" style="display:none">
-        <div class="exp-title-row">
+        <div class="exp-header">
           <div class="exp-title">{{ r.Title }}</div>
-          {% if r.Score  %}<span class="score-val">★ {{ r.Score }}</span>{% endif %}
-          <span class="exp-type">{{ r.Type }}</span>
-          {% if r.author %}<span class="exp-author">by {{ r.author }}</span>{% endif %}
-          {% if r.scraped_at %}<span class="scraped-at-badge">↻ {{ r.scraped_at }}</span>{% endif %}
+          <div class="exp-meta-row">
+            {% if r.Score  %}<span class="score-val">★ {{ r.Score }}</span>{% endif %}
+            <span class="exp-type-badge">{{ r.Type }}</span>
+            {% if r.author %}<span class="exp-author">by {{ r.author }}</span>{% endif %}
+            {% if r.scraped_at %}<span class="scraped-at-badge">↻ {{ r.scraped_at }}</span>{% endif %}
+          </div>
         </div>
 
-        <div class="tl-row" style="margin-bottom:.5rem">
+        <div class="tl-row">
           {% if r.avail_count %}<span class="tl-chip tl-avail"><span class="tl-dot"></span>{{ r.avail_count }} available</span>{% endif %}
           {% if r.out_count   %}<span class="tl-chip tl-out"><span class="tl-dot"></span>{{ r.out_count }} out</span>{% endif %}
           {% if r.hold_count  %}<span class="tl-chip tl-hold"><span class="tl-dot"></span>{{ r.hold_count }} on hold</span>{% endif %}
@@ -214,7 +215,7 @@
         <div class="lib-tabs">
           {% for lib in r.lib_list %}
           {% set tab_cls = 'broward' if lib.library_id == BROWARD_LIBRARY_ID else 'lcpl' %}
-          <button class="lib-tab {{ 'active-' ~ tab_cls if loop.first }}"
+          <button class="lib-tab {{ 'active-' ~ tab_cls if loop.first }}" type="button"
                   onclick="event.stopPropagation();switchLibTab(this,'lib-panel-{{ r.MangaID }}-{{ lib.library_id }}')">
             {{ lib.library_name }}
           </button>
@@ -230,7 +231,7 @@
              id="lib-panel-{{ r.MangaID }}-{{ lib.library_id }}">
           {% if lib.vol_list %}
             <div class="section-label">Volumes — {{ lib_label }}</div>
-            <div class="vol-link-hint">↗ Click a volume to search the catalog</div>
+            <div class="vol-link-hint">↗ Click a volume to open the catalog</div>
             <div class="vol-grid">
               {% for vol_entry in lib.vol_list %}
               {% set best = namespace(cls='out') %}
@@ -239,10 +240,6 @@
                 {% elif 'Hold' in b.status and best.cls != 'avail' %}{% set best.cls = 'hold' %}
                 {% endif %}
               {% endfor %}
-              {#
-                href="#" is a placeholder — JS fills it in _injectCatalogLinks.
-                data-vol and data-lib tell JS which URL base to use.
-              #}
               <a class="vol-chip vol-status-{{ best.cls }}"
                  href="#"
                  data-vol="{{ vol_entry.vol }}"
@@ -265,23 +262,23 @@
               {% endfor %}
             </div>
           {% else %}
-            <div class="no-data-msg">No availability data scraped yet.</div>
+            <p class="no-data-msg">No availability data scraped yet.</p>
           {% endif %}
         </div>
         {% endfor %}
 
         <div class="exp-footer">
           {% if r.has_lcpl %}
-          <a class="lib-link-btn" href="#" data-catalog-link="lcpl"
-             target="_blank" rel="noopener" onclick="event.stopPropagation()">↗ Leon County Library</a>
+          <a class="exp-link-btn" href="#" data-catalog-link="lcpl"
+             target="_blank" rel="noopener" onclick="event.stopPropagation()">↗ Leon County</a>
           {% endif %}
           {% if r.has_broward %}
-          <a class="lib-link-btn broward-btn" href="#" data-catalog-link="broward"
-             target="_blank" rel="noopener" onclick="event.stopPropagation()">↗ Broward County Library</a>
+          <a class="exp-link-btn broward" href="#" data-catalog-link="broward"
+             target="_blank" rel="noopener" onclick="event.stopPropagation()">↗ Broward County</a>
           {% endif %}
-          <a class="lib-link-btn" href="https://myanimelist.net/manga/{{ r.MangaID }}"
-             target="_blank" rel="noopener" onclick="event.stopPropagation()">↗ MyAnimeList</a>
-          <button class="card-close-btn"
+          <a class="exp-link-btn mal" href="https://myanimelist.net/manga/{{ r.MangaID }}"
+             target="_blank" rel="noopener" onclick="event.stopPropagation()">↗ MAL</a>
+          <button class="card-close-btn" type="button"
                   onclick="event.stopPropagation();closeCard(this.closest('.manga-card'))">✕ Close</button>
         </div>
       </div>
@@ -309,20 +306,18 @@
       {% endif %}
       {% if page < total_pages %}<a class="pg-btn" href="/search?page={{ page+1 }}{{ base_qs }}">Next →</a>
       {% else %}<span class="pg-btn disabled">Next →</span>{% endif %}
-      <span class="pg-info">page {{ page }} of {{ total_pages }}</span>
+      <span class="pg-info">{{ page }} / {{ total_pages }}</span>
     </div>
   {% endif %}
 
-  <div class="results-footer-hint">
-    Click a card to expand · Click a volume chip to open the catalog · LCPL = Leon County · BCL = Broward
-  </div>
+  <p class="results-hint">Click a card to expand · Click a volume to open the catalog · LCPL = Leon County · BCL = Broward</p>
 
   {% else %}
   <div class="empty-state">
-    <div class="empty-state-icon">漫</div>
+    <div class="empty-icon">漫</div>
     <h2>No titles found</h2>
-    <p>{% if has_filters %}Your filters didn't match anything.
-    {% else %}No results returned. Try searching a title name.{% endif %}</p>
+    <p>{% if has_filters %}Your filters didn't match any titles. Try removing a filter.
+       {% else %}No results returned. Try searching a title name.{% endif %}</p>
     <a href="/" class="btn primary" style="text-decoration:none;display:inline-flex">← Clear all filters</a>
   </div>
   {% endif %}
@@ -333,6 +328,7 @@
   </div>
 
 </div>
+
 <script type="module" src="{{ url_for('static', filename='results.js') }}"></script>
 </body>
 </html>

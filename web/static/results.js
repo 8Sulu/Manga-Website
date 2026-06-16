@@ -1,8 +1,7 @@
 /**
  * static/results.js
  *
- * Search results page JS.  Catalog URLs are built client-side on card expand
- * rather than server-side for every row (#4).
+ * Search results page JS.  Catalog URLs are built client-side on card expand.
  */
 import { buildLcplUrl, buildBrowardUrl, buildVolUrl } from './catalog_url.js';
 
@@ -29,7 +28,9 @@ document.getElementById('lib-filter-row').addEventListener('click', e => {
 
 function switchLibTab(btn, panelId) {
     const card = btn.closest('.manga-card');
-    card.querySelectorAll('.lib-tab').forEach(t => t.className = t.className.replace(/\s*active-\S+/g, ''));
+    card.querySelectorAll('.lib-tab').forEach(t => {
+        t.className = t.className.replace(/\s*active-\S+/g, '');
+    });
     card.querySelectorAll('.lib-panel').forEach(p => p.classList.remove('visible'));
     btn.classList.add(btn.textContent.includes('Broward') ? 'active-broward' : 'active-lcpl');
     document.getElementById(panelId)?.classList.add('visible');
@@ -38,7 +39,6 @@ function switchLibTab(btn, panelId) {
 // ── Card expand / collapse ─────────────────────────────────────────────────────
 
 function _injectCatalogLinks(card) {
-    /** Build catalog URLs lazily on first expand — not computed server-side. */
     if (card.dataset.urlsInjected) return;
     card.dataset.urlsInjected = '1';
 
@@ -49,19 +49,13 @@ function _injectCatalogLinks(card) {
     const lcplBase    = buildLcplUrl(title, author, type_);
     const browardBase = buildBrowardUrl(title, author, type_);
 
-    // Wire library-level "open catalog" buttons
-    card.querySelectorAll('[data-catalog-link="lcpl"]').forEach(a => {
-        a.href = lcplBase;
-    });
-    card.querySelectorAll('[data-catalog-link="broward"]').forEach(a => {
-        a.href = browardBase;
-    });
+    card.querySelectorAll('[data-catalog-link="lcpl"]').forEach(a => { a.href = lcplBase; });
+    card.querySelectorAll('[data-catalog-link="broward"]').forEach(a => { a.href = browardBase; });
 
-    // Wire volume chips  — data-vol attribute carries the volume number
     card.querySelectorAll('.vol-chip[data-vol][data-lib]').forEach(a => {
-        const vol    = parseInt(a.dataset.vol, 10);
-        const lib    = a.dataset.lib;          // "lcpl" | "broward"
-        const base   = lib === 'broward' ? browardBase : lcplBase;
+        const vol  = parseInt(a.dataset.vol, 10);
+        const lib  = a.dataset.lib;
+        const base = lib === 'broward' ? browardBase : lcplBase;
         a.href = buildVolUrl(base, vol);
     });
 }
@@ -85,7 +79,7 @@ function closeCard(card) {
     expanded.style.display = 'none';
 }
 
-// ── Server-side sort (persisted in URL, works across all pages) ────────────────
+// ── Server-side sort ───────────────────────────────────────────────────────────
 
 function sortCards(key) {
     const url    = new URL(window.location.href);
@@ -113,7 +107,7 @@ function removeFilter(key) {
     window.location.href = url.toString();
 }
 
-// ── MAL list fetch — async background job (#15) ────────────────────────────────
+// ── MAL list fetch ─────────────────────────────────────────────────────────────
 
 async function loadMalList() {
     const loadBtn = document.getElementById('mal-load-btn');
@@ -153,7 +147,7 @@ async function loadMalList() {
 }
 
 async function _pollMalJob(jobId) {
-    const MAX_POLLS    = 60;
+    const MAX_POLLS     = 60;
     const POLL_INTERVAL = 2000;
     for (let i = 0; i < MAX_POLLS; i++) {
         await new Promise(r => setTimeout(r, POLL_INTERVAL));
@@ -162,7 +156,7 @@ async function _pollMalJob(jobId) {
         if (!json.ok && json.status !== 'running') throw new Error(json.message || 'MAL fetch failed');
         if (json.status === 'done') return json.data;
         const loading = document.getElementById('mal-loading');
-        if (loading) loading.textContent = `Loading MAL list… (${(i + 1) * 2}s)`;
+        if (loading) loading.textContent = `Fetching MAL list… (${(i + 1) * 2}s)`;
     }
     throw new Error('MAL list fetch timed out');
 }
@@ -178,7 +172,8 @@ function toggleMalStatus(status, el) {
     el.classList.toggle('pending', next !== (el.dataset.applied || ''));
     const anyPending = [...document.querySelectorAll('.mal-status-item')]
         .some(p => (p.dataset.state || '') !== (p.dataset.applied || ''));
-    document.getElementById('mal-apply-btn')?.classList.toggle('visible', anyPending);
+    const applyBtn = document.getElementById('mal-apply-btn');
+    if (applyBtn) applyBtn.classList.toggle('visible', anyPending);
 }
 
 // ── MAL apply / clear ──────────────────────────────────────────────────────────
@@ -222,7 +217,7 @@ document.querySelectorAll('.mal-status-item[data-status]').forEach(p => {
     p.dataset.applied = p.dataset.state || '';
 });
 
-// Expose functions needed by inline onclick handlers in results.html
+// Expose functions needed by inline onclick handlers
 Object.assign(window, {
     toggleMalPanel, switchLibTab, toggleCard, closeCard,
     sortCards, removeFilter, loadMalList, toggleMalStatus,
