@@ -140,12 +140,12 @@ def admin():
 
 
 def _handle_admin_post():
-    # Support both JSON body (postJson) and FormData (rescrapeSelected)
+    # FIX #2: parse JSON body once here, pass it down — no second get_json call in helpers
     json_body = request.get_json(silent=True) or {}
-    action = request.form.get('action') or json_body.get('action')
+    action    = request.form.get('action') or json_body.get('action')
 
-    if action in ('scrape', 'scrape_broward'):
-        return _start_scrape_job(action)
+    if action in ('scrape_leon', 'scrape_broward'):
+        return _start_scrape_job(action, json_body)
 
     if action == 'get_manga':
         offset = json_body.get('offset', request.form.get('offset', '0'))
@@ -162,41 +162,45 @@ def _handle_admin_post():
     return jsonify({'ok': False, 'message': 'Unknown action'}), 400
 
 
-def _start_scrape_job(action: str):
+def _start_scrape_job(action: str, json_body: dict):
+    # FIX #2: json_body is passed in, not re-parsed from request
     is_broward  = action == 'scrape_broward'
     script      = 'broward_scraper.py' if is_broward else 'leon_scraper.py'
-    lib_pattern = '%Broward%'          if is_broward else '%Leon%'
+    lib_pattern = '%Broward%' if is_broward else '%Leon%'
 
-    range_str = request.form.get('range', '').strip()
-    manga_id  = request.form.get('manga_id', '').strip()
-    only_new  = request.form.get('only_new') == '1'
+    range_str = (request.form.get('range') or json_body.get('range', '')).strip()
+    manga_id  = (request.form.get('manga_id') or json_body.get('manga_id', '')).strip()
+    only_new  = (request.form.get('only_new') or json_body.get('only_new')) == '1'
 
     cmd = [sys.executable, str(SCRIPTS_DIR / script)]
 
     if manga_id:
+        # Used exclusively by the "Find & Re-scrape Title" UI — no range needed
         cmd.extend(['--manga-ids', manga_id])
-
-    elif only_new:
-        missing_ids = _missing_manga_ids(lib_pattern)
-        if not missing_ids:
-            label = 'Broward' if is_broward else 'LCPL'
-            return jsonify({'ok': False, 'message': f'All titles already have {label} data'}), 400
-
-        if range_str:
-            lo, hi    = parse_range_str(range_str, _titles_count())
-            all_ids   = [r['MangaID'] for r in execute_query(
-                'SELECT MangaID FROM manga ORDER BY MangaID'
-            )]
-            valid_ids = set(all_ids[lo - 1:hi])
-            missing_ids = [m for m in missing_ids if m in valid_ids]
-            if not missing_ids:
-                return jsonify({'ok': False, 'message': f'No new titles in range {range_str}'}), 400
-
-        cmd.extend(['--manga-ids', ','.join(map(str, missing_ids))])
 
     elif range_str:
         lo, hi = parse_range_str(range_str, _titles_count())
-        cmd.extend(['--range', f'{lo}-{hi}'])
+
+        if only_new:
+            missing_ids = _missing_manga_ids(lib_pattern)
+            if not missing_ids:
+                label = 'Broward' if is_broward else 'LCPL'
+                return jsonify({'ok': False, 'message': f'All titles already have {label} data'}), 400
+
+            all_ids   = [r['MangaID'] for r in execute_query('SELECT MangaID FROM manga ORDER BY MangaID')]
+            valid_ids = set(all_ids[lo - 1:hi])
+            missing_ids = [m for m in missing_ids if m in valid_ids]
+
+            if not missing_ids:
+                return jsonify({'ok': False, 'message': f'No new titles missing in range {range_str}'}), 400
+
+            cmd.extend(['--manga-ids', ','.join(map(str, missing_ids))])
+        else:
+            cmd.extend(['--range', f'{lo}-{hi}'])
+
+    else:
+        # A range is always required for bulk scrapes — never scrape everything blindly
+        return jsonify({'ok': False, 'message': 'A range is required (e.g. 1-50)'}), 400
 
     def _on_scrape_done(job_name: str, ok: bool) -> None:
         _invalidate_missing_cache()
@@ -204,6 +208,7 @@ def _start_scrape_job(action: str):
     ok, status, msg = start_job(action, cmd, on_complete=_on_scrape_done)
     print(f'\n{cmd}\n')
     return jsonify({'ok': ok, 'message': msg}), status
+
 
 # ── Admin reset ────────────────────────────────────────────────────────────────
 
@@ -259,7 +264,7 @@ def api_stats():
 
         last_scraped = 'Never scraped'
         for log in reversed(read_job_history()):
-            if log['job'] in ('scrape', 'scrape_broward') and log['status'] == 'done':
+            if log['job'] in ('scrape_leon', 'scrape_broward') and log['status'] == 'done':
                 try:
                     dt = datetime.fromisoformat(log['at'])
                     last_scraped = dt.strftime('Scraped %b %-d at %-I:%M %p')
@@ -539,7 +544,9 @@ def api_mal_mangalist_status(job_id: str):
     return jsonify({'ok': True, 'status': 'done', 'data': data})
 
 
+# FIX #11: MAL filter endpoints are session-mutating POSTs — protect with CSRF
 @app.route('/api/mal/set_filter', methods=['POST'])
+@csrf_protect
 def api_mal_set_filter():
     ip = client_ip()
     if rate_limited(f'mal_filter:{ip}', limit=60, window=60):
@@ -565,7 +572,9 @@ def api_mal_set_filter():
     return jsonify({'ok': True})
 
 
+# FIX #11: same — session-mutating POST needs CSRF protection
 @app.route('/api/mal/clear_filter', methods=['POST'])
+@csrf_protect
 def api_mal_clear_filter():
     session.pop('mal_data',    None)
     session.pop('mal_filters', None)
@@ -730,40 +739,32 @@ if __name__ == '__main__':
   <!-- ── Two-column job area ────────────────────────────────────── -->
   <div class="admin-two-col">
 
-    <!-- LCPL scraper -->
     <div class="admin-job-card">
       <div class="admin-job-title">Leon County (LCPL)</div>
       <form id="form-scrape" onsubmit="event.preventDefault();submitScrapeForm('scrape')">
-        <label class="admin-label">Range (e.g. 1–50, blank = all)
-          <input class="admin-input" name="range" type="text" placeholder="1-50">
-        </label>
-        <label class="admin-label">Single MangaID
-          <input class="admin-input" name="manga_id" type="text" placeholder="21">
+        <label class="admin-label">Range (e.g. 1–50) <span style="color:var(--red)">*Required</span>
+          <input class="admin-input" name="range" type="text" placeholder="1-50" required>
         </label>
         <label class="admin-checkbox">
           <input type="checkbox" name="only_new" value="1"> Only scrape missing titles
         </label>
         <div class="admin-btn-row">
-          <button id="start-btn-scrape" class="btn primary" type="submit">▶ Scrape LCPL</button>
-          <button id="stop-btn-scrape"  class="btn danger"  type="button"
-                  style="display:none" onclick="stopJob('scrape')">■ Stop</button>
+          <button id="start-btn-scrape_leon" class="btn primary" type="submit">▶ Scrape LCPL</button>
+          <button id="stop-btn-scrape_leon"  class="btn danger"  type="button"
+                  style="display:none" onclick="stopJob('scrape_leon')">■ Stop</button>
         </div>
       </form>
       <div class="job-progress-wrap">
-        <div class="job-progress-bar" id="progress-scrape" style="display:none;width:0%"></div>
+        <div class="job-progress-bar" id="progress-scrape_leon" style="display:none;width:0%"></div>
       </div>
-      <div class="job-status-text" id="status-scrape"></div>
+      <div class="job-status-text" id="status-scrape_leon"></div>
     </div>
 
-    <!-- Broward scraper -->
     <div class="admin-job-card">
       <div class="admin-job-title">Broward County (BCL)</div>
       <form id="form-scrape_broward" onsubmit="event.preventDefault();submitScrapeForm('scrape_broward')">
-        <label class="admin-label">Range (e.g. 1–50, blank = all)
-          <input class="admin-input" name="range" type="text" placeholder="1-50">
-        </label>
-        <label class="admin-label">Single MangaID
-          <input class="admin-input" name="manga_id" type="text" placeholder="21">
+        <label class="admin-label">Range (e.g. 1–50) <span style="color:var(--red)">*Required</span>
+          <input class="admin-input" name="range" type="text" placeholder="1-50" required>
         </label>
         <label class="admin-checkbox">
           <input type="checkbox" name="only_new" value="1"> Only scrape missing titles
@@ -779,7 +780,6 @@ if __name__ == '__main__':
       </div>
       <div class="job-status-text" id="status-scrape_broward"></div>
     </div>
-
     <!-- get_manga job -->
     <div class="admin-job-card">
       <div class="admin-job-title">Update manga list (MAL)</div>
@@ -821,7 +821,7 @@ if __name__ == '__main__':
         <span class="rescrape-id-badge" id="rescrape-id-badge"></span>
       </div>
       <div class="admin-btn-row" id="rescrape-btns" style="display:none">
-        <button class="btn primary" onclick="rescrapeSelected('scrape')">▶ Re-scrape LCPL</button>
+        <button class="btn primary" onclick="rescrapeSelected('scrape_leon')">▶ Re-scrape LCPL</button>
         <button class="btn primary" style="color:var(--amber);border-color:var(--amber)"
                 onclick="rescrapeSelected('scrape_broward')">▶ Re-scrape Broward</button>
         <button class="btn" onclick="rescrapeClear()" title="Clear selection">✕</button>
@@ -877,7 +877,7 @@ if __name__ == '__main__':
 
 </div><!-- /.shell -->
 
-<script>const JOB_NAMES = {{ ['scrape', 'scrape_broward', 'get_manga'] | tojson }};</script>
+<script>const JOB_NAMES = {{ ['scrape_leon', 'scrape_broward', 'get_manga'] | tojson }};</script>
 <script src="{{ url_for('static', filename='admin.js') }}" defer></script>
 </body>
 </html>
@@ -888,7 +888,7 @@ if __name__ == '__main__':
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Admin Login — Manga Tracker</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_login.css') }}">
   <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
 </head>
 <body class="login-page">
@@ -926,7 +926,7 @@ if __name__ == '__main__':
   </div>
 </div>
 
-<script src="{{ url_for('static', filename='login.js') }}"></script>
+<script src="{{ url_for('static', filename='admin_login.js') }}"></script>
 </body>
 </html>
 <!DOCTYPE html>
@@ -1123,6 +1123,7 @@ if __name__ == '__main__':
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
   <title>Search Results — Manga Tracker</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='results.css') }}">
@@ -1452,7 +1453,7 @@ if __name__ == '__main__':
 <script type="module" src="{{ url_for('static', filename='results.js') }}"></script>
 </body>
 </html>
-/* admin.css — Admin dashboard + login styles */
+/* admin.css — Admin dashboard styles */
 
 /* ── Shell / layout ─────────────────────────────────────────────────────────── */
 
@@ -1727,11 +1728,11 @@ if __name__ == '__main__':
   vertical-align: top;
 }
 
-.history-table td:first-child      { color: var(--purple); }
-.history-table .hist-msg           { color: var(--text3); word-break: break-all; }
-.history-table .hist-at            { white-space: nowrap; color: var(--text3); }
+.history-table td:first-child           { color: var(--purple); }
+.history-table .hist-msg                { color: var(--text3); word-break: break-all; }
+.history-table .hist-at                 { white-space: nowrap; color: var(--text3); }
 .history-table .hist-done td:first-child { color: var(--green); }
-.history-table .hist-error td      { color: var(--red); }
+.history-table .hist-error td           { color: var(--red); }
 
 /* ── Admin footer ────────────────────────────────────────────────────────────── */
 
@@ -1816,161 +1817,6 @@ if __name__ == '__main__':
   padding: .1rem .4rem;
   white-space: nowrap;
 }
-
-/* ── Login card ──────────────────────────────────────────────────────────────── */
-
-.login-page {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 100vh;
-}
-
-.login-card {
-  width: 100%;
-  max-width: 360px;
-  margin: 1rem;
-  background: var(--bg2);
-  border: 1px solid var(--border2);
-  border-radius: var(--r-xl);
-  overflow: hidden;
-}
-
-.login-header {
-  padding: 2rem 2rem 1.5rem;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg3);
-  text-align: center;
-}
-
-.login-eyebrow {
-  font-family: var(--mono);
-  font-size: .6rem;
-  letter-spacing: .2em;
-  text-transform: uppercase;
-  color: var(--purple);
-  margin-bottom: .75rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
-
-.login-eyebrow::before,
-.login-eyebrow::after {
-  content: '';
-  display: inline-block;
-  width: 20px;
-  height: 1px;
-  background: var(--purple);
-  opacity: .5;
-}
-
-.login-title {
-  font-family: var(--display);
-  font-size: 1.5rem;
-  font-weight: 800;
-  letter-spacing: -.03em;
-  line-height: 1;
-  margin-bottom: .3rem;
-}
-
-.login-title span {
-  background: var(--green);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-.login-sub {
-  font-family: var(--mono);
-  font-size: .65rem;
-  color: var(--text3);
-  letter-spacing: .04em;
-}
-
-.login-body {
-  padding: 1.75rem 2rem 2rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.login-field {
-  display: flex;
-  flex-direction: column;
-  gap: .45rem;
-  margin-bottom: 1rem;
-}
-
-.login-label {
-  font-family: var(--mono);
-  font-size: .62rem;
-  letter-spacing: .12em;
-  text-transform: uppercase;
-  color: var(--text3);
-}
-
-.pw-wrap { position: relative; }
-.pw-wrap input { padding-right: 2.5rem; }
-
-.pw-toggle {
-  position: absolute;
-  right: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  background: none;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-  color: var(--text3);
-  font-size: .75rem;
-  width: auto;
-  min-width: 0;
-  line-height: 1;
-  transition: color .15s;
-}
-.pw-toggle:hover { color: var(--text2); background: none; border: none; }
-
-.login-error {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: .6rem .85rem;
-  background: var(--red-bg);
-  border: 1px solid var(--red-brd);
-  border-radius: var(--r);
-  font-family: var(--mono);
-  font-size: .72rem;
-  color: var(--red);
-}
-.login-error::before { content: '✗'; flex-shrink: 0; }
-
-.login-btn {
-  width: 100%;
-  justify-content: center;
-  background: linear-gradient(135deg, var(--purple2), var(--purple));
-  border-color: transparent;
-  color: #fff;
-  padding: 10px;
-  font-size: .78rem;
-  letter-spacing: .06em;
-  box-shadow: 0 2px 20px rgba(157,125,255,.25);
-  transition: box-shadow .15s, transform .15s;
-}
-.login-btn:hover { box-shadow: 0 4px 30px rgba(157,125,255,.4); transform: translateY(-1px); }
-
-.login-footer {
-  padding: .75rem 2rem 1.25rem;
-  text-align: center;
-}
-.login-footer a {
-  font-family: var(--mono);
-  font-size: .65rem;
-  color: var(--text3);
-  transition: color .15s;
-}
-.login-footer a:hover { color: var(--purple); }
 
 /* ── Mobile ──────────────────────────────────────────────────────────────────── */
 
@@ -2308,6 +2154,191 @@ document.addEventListener('DOMContentLoaded', () => {
 // so this module doesn't need to hardcode them:
 //   <script>const JOB_NAMES = {{ job_names | tojson }};</script>
 // That tiny inline script is acceptable — it's data, not logic.
+/* admin_login.css — Login page styles (extracted from admin.css) */
+
+/* ── Page centering ──────────────────────────────────────────── */
+
+.login-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+}
+
+/* ── Login card ──────────────────────────────────────────────── */
+
+.login-card {
+  width: 100%;
+  max-width: 360px;
+  margin: 1rem;
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: var(--r-xl);
+  overflow: hidden;
+}
+
+.login-header {
+  padding: 2rem 2rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg3);
+  text-align: center;
+}
+
+.login-eyebrow {
+  font-family: var(--mono);
+  font-size: .6rem;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+  color: var(--purple);
+  margin-bottom: .75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.login-eyebrow::before,
+.login-eyebrow::after {
+  content: '';
+  display: inline-block;
+  width: 20px;
+  height: 1px;
+  background: var(--purple);
+  opacity: .5;
+}
+
+.login-title {
+  font-family: var(--display);
+  font-size: 1.5rem;
+  font-weight: 800;
+  letter-spacing: -.03em;
+  line-height: 1;
+  margin-bottom: .3rem;
+}
+
+.login-title span {
+  background: var(--green);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.login-sub {
+  font-family: var(--mono);
+  font-size: .65rem;
+  color: var(--text3);
+  letter-spacing: .04em;
+}
+
+/* ── Form ────────────────────────────────────────────────────── */
+
+.login-body {
+  padding: 1.75rem 2rem 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.login-field {
+  display: flex;
+  flex-direction: column;
+  gap: .45rem;
+  margin-bottom: 1rem;
+}
+
+.login-label {
+  font-family: var(--mono);
+  font-size: .62rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--text3);
+}
+
+.pw-wrap { position: relative; }
+.pw-wrap input { padding-right: 2.5rem; }
+
+.pw-toggle {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--text3);
+  font-size: .75rem;
+  width: auto;
+  min-width: 0;
+  line-height: 1;
+  transition: color .15s;
+}
+.pw-toggle:hover { color: var(--text2); background: none; border: none; }
+
+/* ── Error message ───────────────────────────────────────────── */
+
+.login-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: .6rem .85rem;
+  background: var(--red-bg);
+  border: 1px solid var(--red-brd);
+  border-radius: var(--r);
+  font-family: var(--mono);
+  font-size: .72rem;
+  color: var(--red);
+}
+.login-error::before { content: '✗'; flex-shrink: 0; }
+
+/* ── Submit button ───────────────────────────────────────────── */
+
+.login-btn {
+  width: 100%;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--purple2), var(--purple));
+  border-color: transparent;
+  color: #fff;
+  padding: 10px;
+  font-size: .78rem;
+  letter-spacing: .06em;
+  box-shadow: 0 2px 20px rgba(157,125,255,.25);
+  transition: box-shadow .15s, transform .15s;
+}
+.login-btn:hover {
+  box-shadow: 0 4px 30px rgba(157,125,255,.4);
+  transform: translateY(-1px);
+}
+
+/* ── Footer ──────────────────────────────────────────────────── */
+
+.login-footer {
+  padding: .75rem 2rem 1.25rem;
+  text-align: center;
+}
+.login-footer a {
+  font-family: var(--mono);
+  font-size: .65rem;
+  color: var(--text3);
+  transition: color .15s;
+}
+.login-footer a:hover { color: var(--purple); }
+/**
+ * static/admin_login.js — Admin login page JS
+ * (renamed from login.js for consistency with admin_login.html / admin_login.css)
+ */
+
+function togglePw() {
+  const input = document.getElementById('password');
+  const btn   = document.getElementById('pw-toggle');
+  input.type  = input.type === 'password' ? 'text' : 'password';
+  btn.textContent = input.type === 'password' ? '👁' : '🙈';
+}
+
+document.getElementById('password').addEventListener('input', () => {
+  const err = document.querySelector('.login-error');
+  if (err) err.style.opacity = '.5';
+});
 /**
  * static/catalog_url.js
  *
@@ -2667,753 +2698,150 @@ document.getElementById('filter-pills').addEventListener('click', e => {
   pill.classList.add('active');
   document.getElementById(group === 'avail' ? 'f-avail' : 'f-library').value = val;
 });
-/**
- * static/login.js — Admin login page JS
- */
-
-function togglePw() {
-  const input = document.getElementById('password');
-  const btn   = document.getElementById('pw-toggle');
-  input.type  = input.type === 'password' ? 'text' : 'password';
-  btn.textContent = input.type === 'password' ? '👁' : '🙈';
+.page-header {
+  padding: 1.25rem 0 1rem; border-bottom: 1px solid var(--border); margin-bottom: 1.5rem;
+  display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
 }
-
-document.getElementById('password').addEventListener('input', () => {
-  const err = document.querySelector('.login-error');
-  if (err) err.style.opacity = '.5';
-});
-/* results.css — Search results page styles */
-
-/* ── Results bar ──────────────────────────────────────────────── */
-
-.results-bar {
-  display: flex;
-  align-items: center;
-  gap: .75rem;
-  margin-bottom: 1rem;
-  flex-wrap: wrap;
-}
-
-.results-count-big {
-  font-family: var(--display);
-  font-size: 1.2rem;
-  font-weight: 700;
-  color: var(--text);
-  line-height: 1;
-}
-
-.results-of {
-  font-family: var(--mono);
-  font-size: .75rem;
-  color: var(--text3);
-  font-weight: 400;
-  margin-left: 3px;
-}
-
-.sort-btns {
-  display: flex;
-  gap: 5px;
-  margin-left: auto;
-  align-items: center;
-}
-
-.sort-label {
-  font-family: var(--mono);
-  font-size: .6rem;
-  color: var(--text3);
-  margin-right: 2px;
-  text-transform: uppercase;
-  letter-spacing: .08em;
-}
-
-.sort-btn {
-  font-family: var(--mono);
-  font-size: .65rem;
-  padding: 4px 10px;
-  background: var(--bg3);
-  border: 1px solid var(--border2);
-  border-radius: 99px;
-  color: var(--text3);
-  cursor: pointer;
-  transition: all .12s;
-  width: auto;
-  min-width: 0;
-}
-
-.sort-btn:hover { border-color: var(--border3); color: var(--text); background: var(--bg3); }
-.sort-btn.active { background: var(--purple-bg); border-color: var(--purple-brd); color: var(--purple); }
-
-/* ── Library filter pills ─────────────────────────────────────── */
-
-.lib-filter-row {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin-bottom: .85rem;
-}
-
-.lib-filter-pill {
-  font-family: var(--mono);
-  font-size: .67rem;
-  padding: 5px 13px;
-  border-radius: 99px;
-  border: 1px solid var(--border2);
-  background: var(--bg3);
-  color: var(--text3);
-  cursor: pointer;
-  transition: all .14s;
-  text-decoration: none;
-}
-
-.lib-filter-pill:hover                    { border-color: var(--border3); color: var(--text); }
-.lib-filter-pill.pill-all.active          { background: var(--purple-bg); border-color: var(--purple-brd); color: var(--purple); }
-.lib-filter-pill.pill-lcpl.active         { background: var(--green-bg);  border-color: var(--green-brd);  color: var(--green); }
-.lib-filter-pill.pill-broward.active      { background: var(--amber-bg);  border-color: var(--amber-brd);  color: var(--amber); }
-
-/* ── Active filter chips ──────────────────────────────────────── */
-
-.filter-chips {
-  display: flex;
-  gap: 5px;
-  flex-wrap: wrap;
-  margin-bottom: .85rem;
-}
-
-.fchip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-family: var(--mono);
-  font-size: .63rem;
-  padding: 3px 8px 3px 10px;
-  border-radius: 99px;
-  background: var(--bg3);
-  border: 1px solid var(--border2);
-  color: var(--text2);
-}
-
-.fchip-green { background: var(--green-bg); border-color: var(--green-brd); color: var(--green); }
-.fchip-red   { background: var(--red-bg);   border-color: var(--red-brd);   color: var(--red); }
-.fchip-amber { background: var(--amber-bg); border-color: var(--amber-brd); color: var(--amber); }
-
-.fchip-x {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: rgba(255,255,255,.06);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  color: inherit;
-  font-size: .6rem;
-  border: none;
-  padding: 0;
-  opacity: .7;
-  min-width: 0;
-  transition: opacity .12s, background .12s;
-}
-
-.fchip-x:hover { opacity: 1; background: rgba(255,255,255,.14); }
-
-/* ── Pagination ───────────────────────────────────────────────── */
-
-.pagination-row {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  margin-top: 2rem;
-  flex-wrap: wrap;
-}
-
-.pagination-row.top {
-  margin-top: .25rem;
-  margin-bottom: .9rem;
-  justify-content: flex-end;
-}
-
-.pg-btn {
-  font-family: var(--mono);
-  font-size: .68rem;
-  padding: 5px 10px;
-  background: var(--bg3);
-  border: 1px solid var(--border2);
-  border-radius: var(--r);
-  color: var(--text3);
-  cursor: pointer;
-  text-decoration: none;
-  transition: all .12s;
-  display: inline-block;
-}
-
-.pg-btn:hover    { border-color: var(--border3); color: var(--text); }
-.pg-btn.active   { background: var(--purple-bg); border-color: var(--purple-brd); color: var(--purple); }
-.pg-btn.disabled { opacity: .3; pointer-events: none; }
-
-.pg-ellipsis { font-family: var(--mono); font-size: .68rem; color: var(--text3); padding: 5px 3px; }
-.pg-info     { font-family: var(--mono); font-size: .62rem; color: var(--text3); margin-left: .4rem; }
-
-/* ── MAL panel ────────────────────────────────────────────────── */
-
-.mal-panel {
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  margin-bottom: 1.1rem;
-  overflow: hidden;
-}
-
-.mal-toggle-row {
-  width: 100%;
-  text-align: left;
-  display: flex;
-  align-items: center;
-  gap: .75rem;
-  padding: .75rem 1.1rem;
-  cursor: pointer;
-  background: var(--bg3);
-  border: none;
-  border-radius: 0;
-  color: inherit;
-  transition: background .12s;
-}
-
-.mal-toggle-row:hover { background: var(--bg4); }
-
-.mal-title {
-  font-family: var(--mono);
-  font-size: .63rem;
-  letter-spacing: .12em;
-  text-transform: uppercase;
-  color: var(--text2);
-  flex: 1;
-}
-
-.mal-hint-inline {
-  font-family: var(--mono);
-  font-size: .62rem;
-  color: var(--text3);
-}
-
-.mal-chevron {
-  font-family: var(--mono);
-  font-size: .6rem;
-  color: var(--text3);
-  transition: transform .2s;
-  display: inline-block;
-  flex-shrink: 0;
-}
-
-.mal-panel.open .mal-chevron { transform: rotate(90deg); }
-
-.mal-active-badge {
-  font-family: var(--mono);
-  font-size: .58rem;
-  padding: 2px 7px;
-  border-radius: 99px;
-  background: var(--amber-bg);
-  border: 1px solid var(--amber-brd);
-  color: var(--amber);
-}
-
-.mal-body {
-  display: none;
-  padding: 0 1.1rem .9rem;
-  border-top: 1px solid var(--border);
-}
-
-.mal-panel.open .mal-body { display: block; }
-
-.mal-header {
-  display: flex;
-  align-items: center;
-  gap: .65rem;
-  padding-top: .8rem;
-  margin-bottom: .75rem;
-  flex-wrap: wrap;
-}
-
-.mal-loading { font-family: var(--mono); font-size: .68rem; color: var(--text3); }
-.mal-error   { font-family: var(--mono); font-size: .68rem; color: var(--amber); }
-
-.mal-load-btn  { font-size: .65rem; padding: 5px 13px; }
-.mal-apply-btn { font-size: .65rem; padding: 5px 13px; }
-.mal-apply-btn.visible { display: inline-flex !important; }
-.mal-apply-btn.busy    { opacity: .5; pointer-events: none; }
-
-.mal-clear-btn {
-  font-family: var(--mono);
-  font-size: .63rem;
-  padding: 4px 10px;
-  background: none;
-  border: 1px solid var(--border2);
-  color: var(--text3);
-  border-radius: var(--r);
-  cursor: pointer;
-  width: auto;
-  min-width: 0;
-}
-
-.mal-clear-btn:hover { border-color: var(--red-brd); color: var(--red); background: var(--red-bg); }
-
-.mal-status-row {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  align-items: center;
-  margin-bottom: .6rem;
-}
-
-.mal-status-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-family: var(--mono);
-  font-size: .67rem;
-  color: var(--text2);
-  padding: 4px 10px;
-  border-radius: 99px;
-  border: 1px solid var(--border2);
-  background: var(--bg3);
-  cursor: pointer;
-  user-select: none;
-  transition: all .12s;
-  width: auto;
-  min-width: 0;
-}
-
-.mal-status-item:hover                     { border-color: var(--border3); }
-.mal-status-item[data-state="include"]     { background: var(--green-bg); border-color: var(--green-brd); color: var(--green); }
-.mal-status-item[data-state="exclude"]     { background: var(--red-bg);   border-color: var(--red-brd);   color: var(--red); }
-.mal-status-item.pending                   { outline: 2px solid var(--purple-brd); outline-offset: 2px; }
-
-.mal-status-icon { font-size: .75rem; min-width: .85rem; text-align: center; }
-
-.mal-hint-text {
-  font-family: var(--mono);
-  font-size: .62rem;
-  color: var(--text3);
-  line-height: 1.7;
-}
-
-.hint-green { color: var(--green); }
-.hint-red   { color: var(--red); }
-.hint-amber { color: var(--amber); margin-left: .5rem; }
-
-/* ── Manga card grid ──────────────────────────────────────────── */
-
-.results-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(175px, 1fr));
-  gap: 14px;
-}
-
-.manga-card {
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  overflow: hidden;
-  cursor: pointer;
-  transition: transform .18s, border-color .18s, box-shadow .18s;
-}
-
-.manga-card:hover {
-  transform: translateY(-3px);
-  border-color: var(--border2);
-  box-shadow: 0 10px 32px rgba(0,0,0,.5);
-}
-
-.manga-card.open {
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: 180px 1fr;
-  transform: none;
-  border-color: var(--purple-brd);
-  border-top: 2px solid var(--purple);
-  box-shadow: 0 4px 24px rgba(0,0,0,.35);
-}
-
-/* ── Cover ────────────────────────────────────────────────────── */
-
-.manga-cover {
-  width: 100%;
-  aspect-ratio: 2/3;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: flex-end;
-  padding: .6rem;
-  position: relative;
-  overflow: hidden;
-  border-radius: var(--r-lg) var(--r-lg) 0 0;
-}
-
-.manga-card.open .manga-cover {
-  aspect-ratio: auto;
-  min-height: 220px;
-  border-radius: 0;
-}
-
-.cover-initial {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -60%);
-  font-family: var(--display);
-  font-size: 3.5rem;
-  font-weight: 800;
-  color: rgba(255,255,255,.12);
-  pointer-events: none;
-  user-select: none;
-}
-
-.cover-score {
-  position: relative;
-  font-family: var(--mono);
-  font-size: .63rem;
-  color: rgba(255,255,255,.8);
-  background: rgba(0,0,0,.5);
-  padding: 2px 6px;
-  border-radius: 4px;
-  align-self: flex-end;
-}
-
-/* ── Card body (compact) ──────────────────────────────────────── */
-
-.manga-body {
-  padding: .6rem .7rem .7rem;
-}
-
-.manga-card.open .manga-body {
-  padding: 1.1rem 1.4rem;
-  display: flex;
-  flex-direction: column;
-  gap: .6rem;
-  overflow-y: auto;
-}
-
-.manga-card-title {
-  font-size: .82rem;
-  font-weight: 500;
-  color: var(--text);
-  line-height: 1.3;
-  margin-bottom: .3rem;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.manga-card-meta {
-  font-family: var(--mono);
-  font-size: .61rem;
-  color: var(--text3);
-  margin-bottom: .4rem;
-}
-
-/* ── Traffic-light chips ──────────────────────────────────────── */
-
-.tl-row { display: flex; gap: 5px; flex-wrap: wrap; }
-
-.tl-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-family: var(--mono);
-  font-size: .61rem;
-  padding: 2px 6px;
-  border-radius: 99px;
-  border: 1px solid;
-}
-
-.tl-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
-
-.tl-avail { background: var(--green-bg); border-color: var(--green-brd); color: var(--green); }
-.tl-avail .tl-dot { background: var(--green); }
-.tl-out   { background: var(--red-bg);   border-color: var(--red-brd);   color: var(--red); }
-.tl-out .tl-dot   { background: var(--red); }
-.tl-hold  { background: var(--amber-bg); border-color: var(--amber-brd); color: var(--amber); }
-.tl-hold .tl-dot  { background: var(--amber); }
-
-/* ── Card footer row (compact) ────────────────────────────────── */
-
-.card-footer-row {
-  display: flex;
-  gap: 4px;
-  margin-top: .3rem;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.lib-badge {
-  font-family: var(--mono);
-  font-size: .57rem;
-  padding: 1px 6px;
-  border-radius: 99px;
-  border: 1px solid;
-}
-
-.lib-badge.lcpl    { background: var(--green-bg); border-color: var(--green-brd); color: var(--green); }
-.lib-badge.broward { background: var(--amber-bg); border-color: var(--amber-brd); color: var(--amber); }
-
-.scraped-at-badge {
-  font-family: var(--mono);
-  font-size: .57rem;
-  color: var(--text3);
-  opacity: .6;
-}
-
-/* ── Expanded card ────────────────────────────────────────────── */
-
-.exp-header { display: flex; flex-direction: column; gap: .3rem; }
-
-.exp-title {
-  font-family: var(--display);
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: var(--text);
-  line-height: 1.25;
-}
-
-.exp-meta-row {
-  display: flex;
-  align-items: center;
-  gap: .5rem;
-  flex-wrap: wrap;
-}
-
-.score-val {
-  font-family: var(--mono);
-  font-size: .8rem;
-  color: var(--green);
-  font-weight: 700;
-}
-
-.exp-type-badge {
-  font-family: var(--mono);
-  font-size: .6rem;
-  padding: 2px 8px;
-  border-radius: 99px;
-  background: var(--purple-bg);
-  border: 1px solid var(--purple-brd);
-  color: var(--purple);
-}
-
-.exp-author {
-  font-family: var(--mono);
-  font-size: .65rem;
-  color: var(--text3);
-}
-
-/* ── Library tabs ─────────────────────────────────────────────── */
-
-.lib-tabs {
-  display: flex;
-  gap: 5px;
-  border-bottom: 1px solid var(--border);
-  padding-bottom: .6rem;
-}
-
-.lib-tab {
-  font-family: var(--mono);
-  font-size: .63rem;
-  padding: 4px 12px;
-  border-radius: 99px;
-  border: 1px solid var(--border2);
-  background: var(--bg4);
-  color: var(--text3);
-  cursor: pointer;
-  transition: all .12s;
-  width: auto;
-  min-width: 0;
-}
-
-.lib-tab:hover { border-color: var(--border3); color: var(--text); background: var(--bg4); }
-.lib-tab.active-lcpl    { background: var(--green-bg);  border-color: var(--green-brd);  color: var(--green); }
-.lib-tab.active-broward { background: var(--amber-bg);  border-color: var(--amber-brd);  color: var(--amber); }
-
-.lib-panel         { display: none; }
-.lib-panel.visible { display: block; }
-
-/* ── Vol grid ─────────────────────────────────────────────────── */
-
-.vol-link-hint {
-  font-family: var(--mono);
-  font-size: .57rem;
-  color: var(--text3);
-  margin-top: .35rem;
-  margin-bottom: .4rem;
-  opacity: .6;
-}
-
-.vol-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
-  gap: 5px;
-}
+.back-link { font-family: var(--mono); font-size: .7rem; color: var(--text3); display: flex; align-items: center; gap: 5px; }
+.back-link:hover { color: var(--purple); }
+.sep { font-family: var(--mono); font-size: .6rem; color: var(--text3); opacity: .4; }
+
+/* ── Volume chips ────────────────────────────────────────── */
+.vol-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px,1fr)); gap: 5px; }
 
 .vol-chip {
-  background: var(--bg4);
-  border: 1px solid var(--border);
-  border-radius: var(--r);
-  padding: .4rem .6rem;
-  font-family: var(--mono);
-  font-size: .61rem;
-  border-left: 2px solid var(--border2);
-  display: block;
-  text-decoration: none;
-  color: inherit;
+  background: var(--bg4); border: 1px solid var(--border); border-radius: var(--r);
+  padding: .35rem .55rem; font-family: var(--mono); font-size: .62rem;
   transition: border-color .12s, background .12s;
+  border-left: 3px solid var(--border2);
 }
-
 .vol-chip.vol-status-avail {
   border-left-color: var(--green);
-  background: color-mix(in srgb, var(--green-bg) 55%, var(--bg4));
+  background: color-mix(in srgb, var(--green-bg) 60%, var(--bg4));
 }
 .vol-chip.vol-status-hold {
   border-left-color: var(--amber);
-  background: color-mix(in srgb, var(--amber-bg) 55%, var(--bg4));
+  background: color-mix(in srgb, var(--amber-bg) 60%, var(--bg4));
 }
 .vol-chip.vol-status-out {
   border-left-color: var(--red);
-  background: color-mix(in srgb, var(--red-bg) 55%, var(--bg4));
+  background: color-mix(in srgb, var(--red-bg) 60%, var(--bg4));
 }
 
-a.vol-chip:hover                  { border-color: var(--purple-brd); background: var(--purple-bg); border-left-color: var(--purple); }
-a.vol-chip.vol-status-avail:hover { border-color: var(--green-brd);  background: var(--green-bg);  border-left-color: var(--green); }
-a.vol-chip.vol-status-hold:hover  { border-color: var(--amber-brd);  background: var(--amber-bg);  border-left-color: var(--amber); }
-a.vol-chip.vol-status-out:hover   { border-color: var(--red-brd);    background: var(--red-bg);    border-left-color: var(--red); }
+a.vol-chip {
+  display: block; text-decoration: none; color: inherit; cursor: pointer;
+}
+
+a.vol-chip:hover                    { border-color: var(--purple-brd); background: var(--purple-bg); border-left-color: var(--purple); }
+a.vol-chip.vol-status-avail:hover   { border-color: var(--green-brd);  background: var(--green-bg);  border-left-color: var(--green); }
+a.vol-chip.vol-status-hold:hover    { border-color: var(--amber-brd);  background: var(--amber-bg);  border-left-color: var(--amber); }
+a.vol-chip.vol-status-out:hover     { border-color: var(--red-brd);    background: var(--red-bg);    border-left-color: var(--red); }
 
 a.vol-chip:hover .vol-chip-num                  { color: var(--purple); }
 a.vol-chip.vol-status-avail:hover .vol-chip-num { color: var(--green); }
 a.vol-chip.vol-status-hold:hover  .vol-chip-num { color: var(--amber); }
 a.vol-chip.vol-status-out:hover   .vol-chip-num { color: var(--red); }
 
-.vol-chip-num {
-  color: var(--text3);
-  margin-bottom: 3px;
-  font-size: .57rem;
-  transition: color .12s;
-}
-
-.vol-chip-branches  { display: flex; flex-direction: column; gap: 2px; }
-.vol-branch-row     { display: flex; align-items: center; gap: 4px; }
-.vol-branch-dot     { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; background: var(--text3); }
+.vol-chip-num { color: var(--text3); margin-bottom: 3px; font-size: .58rem; transition: color .12s; }
+.vol-chip-branches { display: flex; flex-direction: column; gap: 2px; }
+.vol-branch-row { display: flex; align-items: center; gap: 4px; }
+.vol-branch-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; background: var(--text3); }
 .vol-branch-dot.avail { background: var(--green); }
 .vol-branch-dot.hold  { background: var(--amber); }
 .vol-branch-dot.out   { background: var(--red); }
-.vol-branch-name    { color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.vol-branch-name { color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 
-.no-data-msg {
-  font-family: var(--mono);
-  font-size: .68rem;
-  color: var(--text3);
-  padding: .5rem 0;
+/* ── Scraped-at badge ─────────────────────────────────────── */
+.scraped-at-badge {
+  font-family: var(--mono); font-size: .58rem;
+  color: var(--text3); white-space: nowrap;
+  opacity: .7;
 }
 
-/* ── Expanded footer ──────────────────────────────────────────── */
+/* ── MAL filter panel ─────────────────────────────────────── */
+.mal-panel {
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: var(--r-lg); margin-bottom: 1.25rem; overflow: hidden;
+}
+.mal-toggle-row {
+  display: flex; align-items: center; gap: .75rem; padding: .75rem 1.25rem;
+  cursor: pointer; user-select: none; transition: background .12s;
+}
+.mal-toggle-row:hover { background: var(--bg3); }
+.mal-title   { font-family: var(--mono); font-size: .65rem; letter-spacing: .12em; text-transform: uppercase; color: var(--text2); flex: 1; }
+.mal-chevron { font-family: var(--mono); font-size: .65rem; color: var(--text3); transition: transform .2s; display: inline-block; }
+.mal-panel.open .mal-chevron { transform: rotate(90deg); }
+.mal-active-badge {
+  font-family: var(--mono); font-size: .58rem; padding: 2px 7px;
+  border-radius: 99px; background: var(--amber-bg); border: 1px solid var(--amber-brd); color: var(--amber);
+}
+.mal-body { display: none; padding: 0 1.25rem 1rem; border-top: 1px solid var(--border); }
+.mal-panel.open .mal-body { display: block; }
 
-.exp-footer {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  align-items: center;
-  padding-top: .25rem;
-  margin-top: auto;
+.mal-header { display: flex; align-items: center; gap: .75rem; margin-bottom: .85rem; flex-wrap: wrap; padding-top: .85rem; }
+.mal-loading { font-family: var(--mono); font-size: .68rem; color: var(--text3); }
+.mal-error   { font-family: var(--mono); font-size: .68rem; color: var(--amber); }
+.mal-load-btn {
+  font-family: var(--mono); font-size: .65rem; padding: 4px 12px;
+  background: var(--purple-bg); border: 1px solid var(--purple-brd);
+  color: var(--purple); border-radius: var(--r); cursor: pointer;
+}
+.mal-load-btn:hover { background: var(--purple); color: #fff; }
+.mal-clear-btn {
+  font-family: var(--mono); font-size: .63rem; padding: 3px 9px;
+  background: none; border: 1px solid var(--border2);
+  color: var(--text3); border-radius: var(--r); cursor: pointer;
+}
+.mal-clear-btn:hover { border-color: var(--red-brd); color: var(--red); }
+.mal-apply-btn {
+  font-family: var(--mono); font-size: .65rem; padding: 4px 14px;
+  background: linear-gradient(135deg, var(--purple2), var(--purple));
+  border: none; color: #fff; border-radius: var(--r); cursor: pointer;
+  display: none; box-shadow: 0 2px 12px rgba(157,125,255,.3);
+  transition: box-shadow .15s, transform .15s;
+}
+.mal-apply-btn:hover { box-shadow: 0 4px 20px rgba(157,125,255,.45); transform: translateY(-1px); }
+.mal-apply-btn.visible { display: inline-flex; align-items: center; gap: 5px; }
+.mal-apply-btn.busy { opacity: .55; pointer-events: none; transform: none !important; }
+
+.mal-status-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.mal-status-item {
+  display: flex; align-items: center; gap: 6px;
+  font-family: var(--mono); font-size: .68rem; color: var(--text2);
+  padding: 4px 10px; border-radius: 99px;
+  border: 1px solid var(--border2); background: var(--bg3);
+  cursor: pointer; user-select: none; transition: all .12s;
+}
+.mal-status-item:hover { border-color: var(--border3); }
+.mal-status-item[data-state="include"] { background: var(--green-bg); border-color: var(--green-brd); color: var(--green); }
+.mal-status-item[data-state="exclude"] { background: var(--red-bg);   border-color: var(--red-brd);   color: var(--red); }
+.mal-status-item.pending { outline: 2px solid var(--purple-brd); outline-offset: 2px; }
+.mal-status-icon { font-size: .75rem; min-width: .85rem; text-align: center; }
+
+/* ── Pagination ───────────────────────────────────────────── */
+.pagination-row {
+  display: flex; align-items: center; justify-content: center;
+  gap: 4px; margin-top: 2rem; flex-wrap: wrap;
+}
+.pagination-row.top { margin-top: .5rem; margin-bottom: 1rem; justify-content: flex-end; }
+.pg-btn {
+  font-family: var(--mono); font-size: .7rem; padding: 5px 11px;
+  background: var(--bg3); border: 1px solid var(--border2);
+  border-radius: var(--r); color: var(--text3); cursor: pointer;
+  text-decoration: none; transition: all .12s; display: inline-block;
+}
+.pg-btn:hover  { border-color: var(--border3); color: var(--text); }
+.pg-btn.active { background: var(--purple-bg); border-color: var(--purple-brd); color: var(--purple); }
+.pg-btn.disabled { opacity: .35; pointer-events: none; }
+.pg-ellipsis { font-family: var(--mono); font-size: .7rem; color: var(--text3); padding: 5px 4px; }
+.pg-info     { font-family: var(--mono); font-size: .65rem; color: var(--text3); margin-left: .5rem; }
+
+.vol-link-hint {
+  font-family: var(--mono); font-size: .58rem; color: var(--text3);
+  margin-top: .4rem; margin-bottom: .2rem; opacity: .7;
 }
 
-.exp-link-btn {
-  font-family: var(--mono);
-  font-size: .63rem;
-  color: var(--purple);
-  background: var(--purple-bg);
-  border: 1px solid var(--purple-brd);
-  padding: 4px 11px;
-  border-radius: var(--r);
-  cursor: pointer;
-  text-decoration: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  transition: background .12s, color .12s;
-}
-
-.exp-link-btn:hover { background: var(--bg4); color: var(--text); border-color: var(--border3); }
-.exp-link-btn.broward { color: var(--amber); background: var(--amber-bg); border-color: var(--amber-brd); }
-.exp-link-btn.broward:hover { background: var(--bg4); color: var(--text); border-color: var(--border3); }
-.exp-link-btn.mal { color: var(--text3); background: var(--bg4); border-color: var(--border2); }
-.exp-link-btn.mal:hover { color: var(--purple); border-color: var(--purple-brd); background: var(--purple-bg); }
-
-.card-close-btn {
-  margin-left: auto;
-  font-family: var(--mono);
-  font-size: .62rem;
-  color: var(--text3);
-  background: none;
-  border: 1px solid var(--border);
-  padding: 3px 9px;
-  border-radius: var(--r);
-  cursor: pointer;
-  width: auto;
-  min-width: 0;
-}
-
-.card-close-btn:hover { color: var(--text); border-color: var(--border2); background: var(--bg4); }
-
-/* ── Empty state ──────────────────────────────────────────────── */
-
-.empty-state {
-  text-align: center;
-  padding: 5rem 2rem;
-  max-width: 420px;
-  margin: 0 auto;
-}
-
-.empty-icon {
-  font-size: 3rem;
-  margin-bottom: 1rem;
-  opacity: .3;
-  font-family: var(--body);
-}
-
-.empty-state h2 {
-  font-family: var(--display);
-  font-size: 1.35rem;
-  font-weight: 700;
-  margin-bottom: .5rem;
-}
-
-.empty-state p {
-  font-family: var(--mono);
-  font-size: .75rem;
-  color: var(--text3);
-  margin-bottom: 1.5rem;
-  line-height: 1.7;
-}
-
-/* ── Page chrome ──────────────────────────────────────────────── */
-
-.results-hint {
-  font-family: var(--mono);
-  font-size: .62rem;
-  color: var(--text3);
-  text-align: center;
-  margin-top: 1.5rem;
-  opacity: .5;
-}
-
-.results-page-footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding-top: 1.5rem;
-  margin-top: 2rem;
-  border-top: 1px solid var(--border);
-}
-
-/* ── Mobile ───────────────────────────────────────────────────── */
-
+/* ── Mobile: expanded card stacks cover above body ────────── */
 @media (max-width: 480px) {
   .manga-card.open {
     grid-template-columns: 1fr;
@@ -3423,8 +2851,6 @@ a.vol-chip.vol-status-out:hover   .vol-chip-num { color: var(--red); }
     aspect-ratio: 16/9;
     min-height: unset;
   }
-  .sort-btns { gap: 3px; }
-  .sort-label { display: none; }
 }
 /**
  * static/results.js
@@ -3432,6 +2858,12 @@ a.vol-chip.vol-status-out:hover   .vol-chip-num { color: var(--red); }
  * Search results page JS.  Catalog URLs are built client-side on card expand.
  */
 import { buildLcplUrl, buildBrowardUrl, buildVolUrl } from './catalog_url.js';
+
+// ── CSRF token (FIX #11: read from meta tag injected by results.html) ──────────
+
+function csrfToken() {
+    return document.querySelector('meta[name="csrf-token"]')?.content || '';
+}
 
 // ── MAL panel toggle ───────────────────────────────────────────────────────────
 
@@ -3553,10 +2985,14 @@ async function loadMalList() {
 
         const data = await _pollMalJob(startJson.job_id);
 
+        // FIX #11: include CSRF token in session-mutating POST
         const setResp = await fetch('/api/mal/set_filter', {
             method:  'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify({
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': csrfToken(),
+            },
+            body: JSON.stringify({
                 data:    data,
                 filters: { reading: '', completed: '', on_hold: '', dropped: '', plan_to_read: '' },
             }),
@@ -3614,10 +3050,14 @@ async function applyMalFilters() {
         filters[p.dataset.status] = p.dataset.state || '';
     });
     try {
+        // FIX #11: include CSRF token in session-mutating POST
         const resp = await fetch('/api/mal/set_filter', {
             method:  'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify({ filters }),
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': csrfToken(),
+            },
+            body: JSON.stringify({ filters }),
         });
         if (!resp.ok) throw new Error('Failed to save filter');
         const url = new URL(window.location.href);
@@ -3631,7 +3071,11 @@ async function applyMalFilters() {
 
 async function clearMalFilter() {
     try {
-        await fetch('/api/mal/clear_filter', { method: 'POST' });
+        // FIX #11: include CSRF token in session-mutating POST
+        await fetch('/api/mal/clear_filter', {
+            method:  'POST',
+            headers: { 'X-CSRF-Token': csrfToken() },
+        });
         const url = new URL(window.location.href);
         url.searchParams.delete('page');
         window.location.href = url.toString();
@@ -4315,7 +3759,7 @@ from typing import Callable
 
 # ── Valid job identifiers ──────────────────────────────────────────────────────
 
-JOB_NAMES: frozenset[str] = frozenset({'scrape', 'scrape_broward', 'get_manga'})
+JOB_NAMES: frozenset[str] = frozenset({'scrape_leon', 'scrape_broward', 'get_manga'})
 
 # How long (seconds) with no stdout output before the watchdog kills the job.
 # Import errors / early crashes typically produce nothing then the process dies,
@@ -4603,31 +4047,26 @@ def client_ip() -> str:
 """
 utils/scraper_utils.py
 
-Shared helpers used by both the LCPL and Broward County scrapers.
-Centralises logic that would otherwise live in parallel across two scripts.
+Shared utilities for leon_scraper.py and broward_scraper.py.
 
 Exports:
-    STATUS_PRIORITY         – dict ranking availability statuses (best = highest)
-    ON_SHELF                – frozenset of status keywords meaning Available
-    is_novel()              – True for Light Novel / Novel manga types
-    normalize_status()      – map raw catalog status string → Available/On Hold/Checked Out
-    branch_short()          – compact display name for a branch (used in results UI)
-    load_title_author_map() – ordered list of (index, title, author, id, type)
-    extract_volume()        – parse a volume number from any title/call-number string
-    fmt_scraped_at()        – re-exported from format_utils for scraper convenience
+    TitleRow            — NamedTuple for rows from load_title_author_map()
+    STATUS_PRIORITY     — dict ranking availability statuses (best = highest)
+    normalize_status()  — map raw catalog status string → Available/On Hold/Checked Out
+    branch_short()      — compact display name for a branch
+    is_novel()          — True for Light Novel / Novel manga types
+    extract_volume()    — parse a volume number from any title/call-number string
+    load_title_author_map() — ordered list of TitleRow from the manga table
 """
 from __future__ import annotations
 
 import re
-import sys
-from pathlib import Path
+from typing import NamedTuple
 
-sys.path.append(str(Path(__file__).parent.parent))
+from utils.database_utils import execute_query
 
 
-# ── Availability status priority ──────────────────────────────────────────────
-# Higher = better.  Used when collapsing multiple copies or branches into one
-# representative status.
+# ── Status priority ───────────────────────────────────────────────────────────
 
 STATUS_PRIORITY: dict[str, int] = {
     'Available':   2,
@@ -4636,174 +4075,189 @@ STATUS_PRIORITY: dict[str, int] = {
 }
 
 
-# ── Status normalisation ──────────────────────────────────────────────────────
-# Catalog systems return verbose, inconsistent status strings.  Everything maps
-# to one of the three canonical values above.
+# ── Status normalisation (FIX #4: exact-match set, no substring collisions) ───
+#
+# Substring matching on raw location strings causes false positives:
+# "Non-Youth Fiction" matches "Youth", "Young Adult Non-Fiction" matches
+# "Adult".  Exact matching against the lowercased string prevents this.
 
-ON_SHELF: frozenset[str] = frozenset({
-    'Graphic Novel',
-    'Youth Fiction',
-    'Adult Non-Fiction',
-    'Available',
-    'General Collection',
-    'New Materials',
+_ON_SHELF_EXACT: frozenset[str] = frozenset({
+    "general collection",
+    "new materials",
+    "reference",
+    "graphic novels",
+    "young adult",
+    "children",
+    "juvenile",
+    "easy",
+    "oversize",
+    "paperback",
+    "manga",
+    "teen",
 })
+
+# Fallback regex for less common but recognisable on-shelf phrasings.
+# Only reached when the exact set doesn't match.
+_ON_SHELF_RE = re.compile(
+    r'\b(on\s+shelf|available|checked\s+in|in\s+library|in\s+stacks)\b',
+    re.IGNORECASE,
+)
 
 
 def normalize_status(raw: str) -> str:
     """
-    Map a raw catalog status string to 'Available', 'On Hold', or 'Checked Out'.
+    Map a raw SirsiDynix status/location string to one of three canonical
+    values: 'Available', 'On Hold', or 'Checked Out'.
 
-    The ON_SHELF set uses substring matching, so 'Graphic Novel - YA Fiction'
-    correctly resolves to 'Available'.
+    Uses exact-match set membership (not substring contains) so partial-word
+    collisions (e.g. 'Non-Youth Fiction' matching 'Youth') are impossible.
+    Falls back to a word-boundary regex for less common on-shelf phrasings.
     """
     if not raw:
         return 'Checked Out'
-    if any(kw in raw for kw in ON_SHELF):
+
+    s = raw.strip().lower()
+
+    # Fast path: direct exact match
+    if s in _ON_SHELF_EXACT:
         return 'Available'
-    if 'hold' in raw.lower():
+
+    # Checked-out / due-date indicators
+    if any(kw in s for kw in ('checked out', 'checkedout', 'due ', 'overdue')):
+        return 'Checked Out'
+
+    if 'hold' in s and 'shelf' not in s:
         return 'On Hold'
+
+    if 'transit' in s:
+        return 'Checked Out'      # in-transit → treat as unavailable
+
+    # Secondary regex for less common "on shelf" phrasings
+    if _ON_SHELF_RE.search(raw):
+        return 'Available'
+
+    # Default: treat as unavailable if we can't positively identify it
     return 'Checked Out'
 
 
 # ── Branch display names ──────────────────────────────────────────────────────
 
-def branch_short(name: str, library_id: int, broward_library_id: int) -> str:
+# Checked in order — first match wins.
+_BRANCH_SHORT_MAP: list[tuple[str, str]] = [
+    ("main",        "Main"),
+    ("central",     "Central"),
+    ("downtown",    "Downtown"),
+    ("north",       "North"),
+    ("south",       "South"),
+    ("east",        "East"),
+    ("west",        "West"),
+    ("beach",       "Beach"),
+    ("airport",     "Airport"),
+    ("carver",      "Carver"),
+    ("african",     "African"),
+    ("lauderdale",  "Laud."),
+    ("pompano",     "Pompano"),
+    ("deerfield",   "Deerfield"),
+    ("tamarac",     "Tamarac"),
+    ("plantation",  "Plant."),
+    ("davie",       "Davie"),
+    ("cooper",      "Cooper"),
+    ("weston",      "Weston"),
+    ("miramar",     "Miramar"),
+    ("hallandale",  "Halland."),
+    ("hollywood",   "Hollywood"),
+    ("dania",       "Dania"),
+    ("pembroke",    "Pembroke"),
+    ("margate",     "Margate"),
+    ("coconut",     "Coconut"),
+    ("sunrise",     "Sunrise"),
+    ("lauderhill",  "L.Hill"),
+    ("imperial",    "Imperial"),
+    ("lakes",       "Lakes"),
+    ("regional",    "Regional"),
+    ("branch",      "Branch"),
+]
+
+
+def branch_short(name: str, library_id: int | None = None,
+                 broward_library_id: int | None = None) -> str:
     """
-    Return a compact display label for a branch, used in the results grid.
+    Return a short display label for a branch name, for use in compact vol chips.
 
-    LCPL and Broward branches are matched by keyword in their full DB name.
-    The broward_library_id parameter distinguishes which lookup table to use.
+    Falls back to the first word of the name if nothing in the map matches.
     """
-    if library_id != broward_library_id:
-        for keyword, short in (
-            ('Main',       'Main'),        ('Leroy',      'Main'),
-            ('Northeast',  'NE Branch'),   ('Bruce',      'NE Branch'),
-            ('Eastside',   'Eastside'),    ('Perry',      'BL Perry'),
-            ('Jackson',    'Lk Jackson'),  ('Braden',     'Ft Braden'),
-            ('Fort',       'Ft Braden'),   ('Woodville',  'Woodville'),
-        ):
-            if keyword in name:
-                return short
-        return name.split(' ')[0]
-
-    for keyword, short in (
-        ('Northwest Regional',      'NW Regional'),
-        ('North Regional',          'N Regional'),
-        ('South Regional',          'S Regional'),
-        ('Southwest Regional',      'SW Regional'),
-        ('West Regional',           'W Regional'),
-        ('Main Library',            'Main'),
-        ('African American',        'AARLCC'),
-        ('Hollywood Beach',         'Hollywood Bch'),
-        ('Hollywood',               'Hollywood'),
-        ('Lauderhill Central',      'Lauderhill CP'),
-        ('Lauderhill Towne',        'Lauderhill TC'),
-        ('Lauderdale Lakes',        'Laud. Lakes'),
-        ('Pompano Beach',           'Pompano Bch'),
-        ('Pembroke Pines',          'Pemb. Pines'),
-        ('Miramar',                 'Miramar'),
-        ('Weston',                  'Weston'),
-        ('Tamarac',                 'Tamarac'),
-        ('Sunrise',                 'Sunrise'),
-        ('Margate',                 'Margate'),
-        ('Deerfield Beach',         'Deerfield Bch'),
-        ('Dania Beach',             'Dania Bch'),
-        ('Hallandale',              'Hallandale'),
-        ('Carver Ranches',          'Carver Ranch'),
-        ('Century Plaza',           'Century Plz'),
-        ('North Lauderdale',        'N. Laud.'),
-        ('Imperial Point',          'Imperial Pt'),
-        ('Riverland',               'Riverland'),
-        ('Davie',                   'Davie/CC'),
-        ('Beach Branch',            'Beach'),
-        ('Jan Moran',               'Jan Moran'),
-        ('Galt Ocean',              'Galt Ocean'),
-        ('Fort Lauderdale Reading', 'FTL Reading'),
-        ('Tyrone Bryant',           'Tyrone Bryant'),
-        ('Northwest Branch',        'NW Branch'),
-        ('Nova Southeastern',       'NSU'),
-    ):
-        if keyword in name:
-            return short
-    return name.split(' ')[0]
+    lower = name.strip().lower()
+    for key, label in _BRANCH_SHORT_MAP:
+        if key in lower:
+            return label
+    first = name.strip().split()[0] if name.strip() else name
+    return first[:8]
 
 
-# ── Media-type helpers ────────────────────────────────────────────────────────
+# ── Novel detection ───────────────────────────────────────────────────────────
+
+_NOVEL_TYPES: frozenset[str] = frozenset({
+    "light novel", "light_novel", "novel", "ln",
+})
+
 
 def is_novel(manga_type: str) -> bool:
-    """Return True for Light Novel / Novel titles (handles spaces and hyphens)."""
-    return (manga_type or '').lower().replace(' ', '-') in ('light-novel', 'novel')
+    return (manga_type or '').strip().lower() in _NOVEL_TYPES
 
 
-# ── Title/author source of truth ──────────────────────────────────────────────
+# ── TitleRow — shared return type for load_title_author_map() ─────────────────
+# FIX #5: TitleRow is kept so external callers can import it if needed,
+# and the return type annotation is accurate.
 
-def load_title_author_map() -> list[tuple[int, str, str, int, str]]:
+class TitleRow(NamedTuple):
+    idx:        int
+    title:      str
+    author:     str
+    manga_id:   int
+    manga_type: str
+
+
+def load_title_author_map() -> list[TitleRow]:
     """
-    Query the manga table and return a list of tuples:
-        (1-based-index, title, author, manga_id, manga_type)
-    ordered by MangaID — the canonical ordering shared by both scrapers.
+    Return every manga row ordered by MangaID.
+    Each element is a TitleRow(idx, title, author, manga_id, manga_type).
     """
-    from config.settings import DB_CONFIG
-    import mysql.connector
-
-    conn   = mysql.connector.connect(**DB_CONFIG)
-    cursor = conn.cursor(dictionary=True)
-    cursor.execute('SELECT MangaID, Title, Author, Type FROM manga ORDER BY MangaID')
-    rows = cursor.fetchall()
-    cursor.close()
-    conn.close()
-
+    rows = execute_query(
+        'SELECT MangaID, Title, Author, Type FROM manga ORDER BY MangaID'
+    )
     return [
-        (i + 1, r['Title'], r['Author'] or '', r['MangaID'], r['Type'] or '')
+        TitleRow(
+            idx        = i + 1,
+            title      = r['Title'],
+            author     = r['Author'] or '',
+            manga_id   = r['MangaID'],
+            manga_type = r['Type'] or '',
+        )
         for i, r in enumerate(rows)
     ]
 
 
 # ── Volume number extraction ──────────────────────────────────────────────────
-# Handles titles like "Berserk Vol. 3", call numbers like "GN V.7",
-# omnibus ranges like "Vol. 7-9" (→ 7), and bare trailing digits.
 
-_OMNIBUS_RE = re.compile(r'(\d+)\s*[-–]\s*\d+')
-
-_VOL_PATTERNS: list[re.Pattern] = [
-    re.compile(r'\bvol(?:ume)?\.?\s*(\d+)',    re.I),   # Vol. 3 / Volume 3
-    re.compile(r'\bv\.?\s*(\d+)\b',            re.I),   # V.3 / v3
-    re.compile(r'#\s*(\d+)\b'),                          # #3
-    re.compile(r'\bno\.?\s*(\d+)\b',           re.I),   # No. 3
-    re.compile(r'\bpart\s*(\d+)\b',            re.I),   # Part 3
-    re.compile(r'\bbook\s*(\d+)\b',            re.I),   # Book 3
-    re.compile(r'\bep(?:isode)?\.?\s*(\d+)\b', re.I),   # Ep. 3 / Episode 3
-]
+_VOL_RE = re.compile(
+    r'(?:vol(?:ume)?\.?\s*|v\.?\s*)(\d+)'
+    r'|,\s*(\d+)$'
+    r'|\s(\d+)\s*$',
+    re.IGNORECASE,
+)
 
 
 def extract_volume(text: str) -> int:
     """
-    Return the volume number embedded in *text*, or 0 if none is found.
-
-    Checks omnibus ranges first ("Vol. 7-9" → 7), then each pattern
-    in priority order, then bare trailing digits as a last resort.
+    Extract a volume number from a title or call-number string.
+    Returns 0 if no volume can be identified (treated as series-level).
     """
     if not text:
         return 0
-
-    m = _OMNIBUS_RE.search(text)
+    m = _VOL_RE.search(text)
     if m:
-        return int(m.group(1))
-
-    for pat in _VOL_PATTERNS:
-        m = pat.search(text)
-        if m:
-            return int(m.group(1))
-
-    m = re.search(r'[.,]\s*(\d+)\s*$', text)
-    if m:
-        return int(m.group(1))
-
-    m = re.search(r'\b(\d+)\s*$', text)
-    if m:
-        return int(m.group(1))
-
+        val = next(g for g in m.groups() if g is not None)
+        return int(val)
     return 0
 """
 utils/search_utils.py
@@ -4855,18 +4309,18 @@ def build_results(
 
         if t not in titles_map:
             titles_map[t] = {
-                'MangaID':    r['MangaID'],
-                'Title':      t,
-                'Volumes':    r['Volumes'],
-                'Type':       r['Type'],
-                'Members':    r['Members'],
-                'Score':      r['Score'],
-                'author':     r.get('Author') or '',
-                'cover':      r.get('CoverMedium') or '',
-                'lib_data':   {},
-                'has_lcpl':   False,
+                'MangaID':     r['MangaID'],
+                'Title':       t,
+                'Volumes':     r['Volumes'],
+                'Type':        r['Type'],
+                'Members':     r['Members'],
+                'Score':       r['Score'],
+                'author':      r.get('Author') or '',
+                'cover':       r.get('CoverMedium') or '',
+                'lib_data':    {},
+                'has_lcpl':    False,
                 'has_broward': False,
-                'scraped_at': None,
+                'scraped_at':  None,
             }
 
         td = titles_map[t]
@@ -5059,11 +4513,10 @@ Reverse-engineers the SirsiDynix Enterprise two-step AJAX flow to fetch
 per-branch, per-volume availability and writes it to MySQL.
 
 Usage:
-    python broward_scraper.py                     scrape all titles
     python broward_scraper.py --range 1-50        scrape lines 1 to 50
     python broward_scraper.py --manga-ids 21,42   scrape specific MangaIDs
-    python broward_scraper.py --output audit.csv  also write results to CSV
-    python broward_scraper.py --debug             verbose URL/copy logging
+    python broward_scraper.py --range 1-50 --output audit.csv
+    python broward_scraper.py --manga-ids 21 --debug
 """
 from __future__ import annotations
 
@@ -5110,32 +4563,74 @@ ON_SHELF_STATUSES = {
     "graphic novels", "young adult", "children",
 }
 
-DB_BATCH_SIZE = 20   # commit to DB after every N titles
+DB_BATCH_SIZE      = 20
+LOOKUP_MAX_RETRIES = 3
+LOOKUP_RETRY_DELAY = 2
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
 
-def _load_broward_branch_map() -> dict[str, int]:
+def _load_broward_ids() -> tuple[int, dict[str, int]]:
+    """
+    Return (broward_library_id, branch_name_to_id_map) from the DB.
+    Raises RuntimeError if Broward is not seeded.
+    """
     conn = get_connection()
     cur  = conn.cursor(dictionary=True)
+
+    cur.execute("SELECT LibraryID FROM library WHERE LibraryName LIKE '%Broward%' LIMIT 1")
+    row = cur.fetchone()
+    if not row:
+        cur.close()
+        conn.close()
+        raise RuntimeError(
+            "Broward library not found in DB. "
+            "Run a DB reset to seed libraries.csv / branches.csv first."
+        )
+    broward_library_id = row["LibraryID"]
+
     cur.execute(
         "SELECT b.BranchID, b.BranchName FROM branch b "
-        "JOIN library l ON b.LibraryID = l.LibraryID "
-        "WHERE l.LibraryName LIKE %s",
-        ("%Broward%",),
+        "WHERE b.LibraryID = %s",
+        (broward_library_id,),
     )
-    rows = cur.fetchall()
+    branch_rows = cur.fetchall()
     cur.close()
     conn.close()
 
-    if not rows:
+    if not branch_rows:
         raise RuntimeError(
             "No Broward branches found in DB. "
             "Run a DB reset to seed libraries.csv / branches.csv first."
         )
 
-    log.info(f"Loaded {len(rows)} Broward branch(es) from DB")
-    return {r["BranchName"]: r["BranchID"] for r in rows}
+    log.info(f"Loaded {len(branch_rows)} Broward branch(es) from DB (library ID {broward_library_id})")
+    branch_map = {r["BranchName"]: r["BranchID"] for r in branch_rows}
+    return broward_library_id, branch_map
+
+
+def _reconnect(conn, cursor):
+    """
+    Ping the connection and reconnect if it has gone away.
+    Returns (conn, cursor) — always use the returned pair, never the originals.
+    """
+    try:
+        conn.ping(reconnect=True, attempts=3, delay=5)
+        cursor.close()
+        return conn, conn.cursor()
+    except Exception as e:
+        log.warning(f"DB ping failed, opening fresh connection: {e}")
+        try:
+            cursor.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
+        conn   = get_connection()
+        cursor = conn.cursor()
+        return conn, cursor
 
 
 def _upsert_results(
@@ -5373,38 +4868,55 @@ def fetch_item_availability(
         ("isd", "true"),
         ("h",   "8"),
     ]
-
     lookup_headers = {**HEADERS, "sdcsrf": sdcsrf, "Content-Length": "0"}
 
     if debug:
         print(f"[DEBUG] lookuptitleinfo: {info_url}")
 
-    try:
-        r = session.post(info_url, params=params, headers=lookup_headers, timeout=15)
-        if r.status_code != 200:
-            log.warning(f"  lookuptitleinfo {item_id} → HTTP {r.status_code}")
+    for attempt in range(LOOKUP_MAX_RETRIES):
+        try:
+            r = session.post(info_url, params=params, headers=lookup_headers, timeout=15)
+
+            if r.status_code == 200:
+                data = r.json()
+                copies = [
+                    {
+                        "library":  (rec.get("LIBRARY") or "").strip(),
+                        "status":   (rec.get("SD_ITEM_STATUS") or "").strip(),
+                        "on_shelf": (rec.get("SD_ITEM_STATUS") or "").strip().lower()
+                                    in ON_SHELF_STATUSES,
+                    }
+                    for rec in data.get("childRecords", [])
+                ]
+                if debug:
+                    print(f"[DEBUG] item {item_id}: {len(copies)} copies")
+                    for c in copies:
+                        print(f"  [{'✓' if c['on_shelf'] else '✗'}] {c['library']} — {c['status']}")
+                return copies
+
+            if r.status_code in (429, 503):
+                wait = LOOKUP_RETRY_DELAY * (2 ** attempt)
+                log.warning(f"  lookuptitleinfo {item_id} → HTTP {r.status_code}, "
+                             f"retry {attempt + 1}/{LOOKUP_MAX_RETRIES} in {wait}s")
+                time.sleep(wait)
+                continue
+
+            log.warning(f"  lookuptitleinfo {item_id} → HTTP {r.status_code} (not retrying)")
             return []
 
-        data = r.json()
-        copies = [
-            {
-                "library":  (rec.get("LIBRARY") or "").strip(),
-                "status":   (rec.get("SD_ITEM_STATUS") or "").strip(),
-                "on_shelf": (rec.get("SD_ITEM_STATUS") or "").strip().lower() in ON_SHELF_STATUSES,
-            }
-            for rec in data.get("childRecords", [])
-        ]
+        except (requests.exceptions.ConnectionError,
+                requests.exceptions.Timeout) as e:
+            wait = LOOKUP_RETRY_DELAY * (2 ** attempt)
+            log.warning(f"  lookuptitleinfo {item_id} network error ({type(e).__name__}), "
+                        f"retry {attempt + 1}/{LOOKUP_MAX_RETRIES} in {wait}s")
+            time.sleep(wait)
 
-        if debug:
-            print(f"[DEBUG] item {item_id}: {len(copies)} copies")
-            for c in copies:
-                print(f"  [{'✓' if c['on_shelf'] else '✗'}] {c['library']} — {c['status']}")
+        except Exception as e:
+            log.warning(f"  lookuptitleinfo error {item_id}: {e}")
+            return []
 
-        return copies
-
-    except (ValueError, Exception) as e:
-        log.warning(f"  lookuptitleinfo error {item_id}: {e}")
-        return []
+    log.error(f"  lookuptitleinfo {item_id} failed after {LOOKUP_MAX_RETRIES} attempts")
+    return []
 
 
 # ── Aggregate copies ──────────────────────────────────────────────────────────
@@ -5459,35 +4971,21 @@ def process_batch(args: argparse.Namespace) -> None:
         return
 
     try:
-        branch_map = _load_broward_branch_map()
+        broward_library_id, branch_map = _load_broward_ids()
     except RuntimeError as e:
         print(f"[-] {e}")
         return
 
-    conn = get_connection()
-    cur  = conn.cursor(dictionary=True)
-    cur.execute("SELECT LibraryID FROM library WHERE LibraryName LIKE '%Broward%' LIMIT 1")
-    row = cur.fetchone()
-    cur.close()
-    conn.close()
-
-    if not row:
-        print("[-] Broward library not found in DB.")
-        return
-    broward_library_id = row["LibraryID"]
-
     if args.manga_ids:
         target_ids = set(args.manga_ids)
-        pairs = [p for p in all_pairs if p[3] in target_ids]
-    elif args.range:
+        pairs = [p for p in all_pairs if p.manga_id in target_ids]
+    else:
         try:
             s, e  = args.range.split("-")
             pairs = all_pairs[max(0, int(s) - 1):int(e)]
         except (ValueError, IndexError):
             print("[-] Invalid --range. Use START-END (e.g. --range 1-50)")
             return
-    else:
-        pairs = all_pairs
 
     if not pairs:
         print("[-] No valid titles matched the criteria.")
@@ -5517,7 +5015,7 @@ def process_batch(args: argparse.Namespace) -> None:
         "Referer":         f"{BASE_URL}{CLIENT}",
     })
 
-    batch_count = 0   # titles written since last commit
+    batch_count = 0
 
     for progress, (idx, title, author, manga_id, manga_type) in enumerate(pairs, 1):
         if not author:
@@ -5535,11 +5033,12 @@ def process_batch(args: argparse.Namespace) -> None:
 
         item_copies: list[tuple[int, list[dict]]] = []
         for j, item in enumerate(items, 1):
-            print(f"  [{j}/{len(items)}] fetching item {item['item_id']} (vol {item['volume']})", flush=True)
+            print(f"  [{j}/{len(items)}] fetching item {item['item_id']} (vol {item['volume']})",
+                  flush=True)
             copies = fetch_item_availability(
                 http_session, item["item_id"], item["index"],
                 title, author, sdcsrf, args.debug,
-            )    
+            )
             item_copies.append((item["volume"], copies))
             if csv_writer:
                 for c in copies:
@@ -5580,8 +5079,8 @@ def process_batch(args: argparse.Namespace) -> None:
                                       volume_branch_map, scraped_at)
                 batch_count += 1
 
-                # ── Batch commit every DB_BATCH_SIZE titles ───────────────────
                 if batch_count >= DB_BATCH_SIZE:
+                    db_conn, cursor = _reconnect(db_conn, cursor)
                     db_conn.commit()
                     print(f"  [DB] committed batch of {batch_count} titles", flush=True)
                     batch_count = 0
@@ -5595,9 +5094,9 @@ def process_batch(args: argparse.Namespace) -> None:
         else:
             print("  [--] No matched branches to store", flush=True)
 
-    # ── Final commit for any remaining titles ─────────────────────────────────
     if batch_count > 0:
         try:
+            db_conn, cursor = _reconnect(db_conn, cursor)
             db_conn.commit()
             print(f"[DB] final commit ({batch_count} title(s))", flush=True)
         except Exception as e:
@@ -5618,7 +5117,7 @@ if __name__ == "__main__":
     parser.add_argument("--debug",  action="store_true", help="Verbose URL/copy logging")
     parser.add_argument("--output", type=str,            help="Also write results to CSV")
 
-    group = parser.add_mutually_exclusive_group()
+    group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--range",     type=str,
                        help="Title range (e.g. 1-50)")
     group.add_argument("--manga-ids", type=lambda s: [int(x) for x in s.split(",")],
@@ -5706,7 +5205,6 @@ scripts/leon_scraper.py  —  Leon County Public Library manga scraper
 Fetches per-branch availability from the SirsiDynix ILSWS REST API.
 
 Usage:
-    python leon_scraper.py                      scrape all titles
     python leon_scraper.py --range 1-50         scrape lines 1 to 50
     python leon_scraper.py --manga-ids 21,42    scrape specific MangaIDs
     python leon_scraper.py --range 1-50 --debug write raw ILSWS JSON to debug/
@@ -5902,12 +5400,12 @@ def parse_title_info(
     manga_type: str,
     html_volume: int | None = None,
 ) -> tuple:
-    books            = []
+    books             = []
     valid_branch_keys = {k.upper() for k in BRANCH_MAPPING}
 
     for title_entry in data.get("TitleInfo", []):
         for call in title_entry.get("CallInfo", []):
-            library_id  = (call.get("libraryID") or "").strip().upper()
+            library_id = (call.get("libraryID") or "").strip().upper()
             if library_id not in valid_branch_keys:
                 continue
 
@@ -5950,7 +5448,7 @@ def scrape(
 
     if manga_ids:
         target_ids      = set(manga_ids)
-        pairs_to_scrape = [p for p in all_pairs if p[3] in target_ids]
+        pairs_to_scrape = [p for p in all_pairs if p.manga_id in target_ids]
     else:
         pairs_to_scrape = all_pairs[max(0, start - 1):end]
 
@@ -6009,6 +5507,31 @@ def scrape(
 
 # ── Database write with batch commits ─────────────────────────────────────────
 
+def _reconnect(conn, cursor):
+    """
+    Ping the connection and reconnect if it has gone away.
+    Returns (conn, cursor) — always use the returned pair, never the originals.
+    """
+    try:
+        conn.ping(reconnect=True, attempts=3, delay=5)
+        # ping may have swapped the underlying socket; get a fresh cursor
+        cursor.close()
+        return conn, conn.cursor()
+    except Exception as e:
+        log.warning(f"DB ping failed, opening fresh connection: {e}")
+        try:
+            cursor.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
+        conn   = get_connection()
+        cursor = conn.cursor()
+        return conn, cursor
+
+
 def write_to_db(books: list) -> str:
     if not books:
         return "no books to write"
@@ -6021,10 +5544,12 @@ def write_to_db(books: list) -> str:
     cursor.execute("SELECT LibraryID FROM library WHERE LibraryName LIKE '%Leon%' LIMIT 1")
     row = cursor.fetchone()
     if not row:
+        cursor.close()
         conn.close()
         return "error: LCPL library not found in DB — run a DB reset first"
     lcpl_library_id = row[0]
 
+    # ── Delete old data for all affected titles up-front ─────────────────────
     manga_ids    = list({b["manga_id"] for b in books})
     placeholders = ",".join(["%s"] * len(manga_ids))
 
@@ -6045,9 +5570,9 @@ def write_to_db(books: list) -> str:
 
     scraped_at = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
 
-    inserted    = skipped     = 0
-    batch_rows  = 0
-    manga_batch = 0
+    inserted         = skipped = 0
+    batch_rows       = 0
+    manga_batch      = 0
     current_manga_id: int | None = None
 
     for b in books:
@@ -6077,11 +5602,13 @@ def write_to_db(books: list) -> str:
                 log.warning(f"  Unknown branch key '{branch_key}' — not in BRANCH_MAPPING")
 
         if manga_batch >= DB_BATCH_SIZE:
+            conn, cursor = _reconnect(conn, cursor)
             conn.commit()
             print(f"  [DB] committed batch ({manga_batch} titles, {batch_rows} rows)", flush=True)
             manga_batch = batch_rows = 0
 
     if batch_rows > 0:
+        conn, cursor = _reconnect(conn, cursor)
         conn.commit()
         print(f"  [DB] final commit ({manga_batch} titles, {batch_rows} rows)", flush=True)
 
@@ -6100,22 +5627,23 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Leon County Public Library manga scraper")
-    parser.add_argument("--debug",     action="store_true", help="Write raw ILSWS JSON to debug/")
-    parser.add_argument("--range",     type=str, help="Scrape a range of titles (e.g. 1-50)")
-    parser.add_argument("--manga-ids", type=lambda s: [int(x) for x in s.split(",")],
-                        metavar="ID,ID", help="Comma-separated MangaIDs")
+    parser.add_argument("--debug", action="store_true", help="Write raw ILSWS JSON to debug/")
+
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--range",     type=str,
+                       help="Scrape a range of titles (e.g. 1-50)")
+    group.add_argument("--manga-ids", type=lambda s: [int(x) for x in s.split(",")],
+                       metavar="ID,ID", help="Comma-separated MangaIDs")
     args = parser.parse_args()
 
     if args.manga_ids:
         books = scrape(manga_ids=args.manga_ids, debug=args.debug)
-    elif args.range:
+    else:
         try:
             lo, hi = args.range.split("-")
             books  = scrape(start=max(1, int(lo)), end=int(hi), debug=args.debug)
         except (ValueError, IndexError):
             print("Invalid --range format. Use START-END (e.g. --range 1-50)")
             raise SystemExit(1)
-    else:
-        books = scrape(debug=args.debug)
 
     print(write_to_db(books))

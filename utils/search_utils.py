@@ -48,18 +48,18 @@ def build_results(
 
         if t not in titles_map:
             titles_map[t] = {
-                'MangaID':    r['MangaID'],
-                'Title':      t,
-                'Volumes':    r['Volumes'],
-                'Type':       r['Type'],
-                'Members':    r['Members'],
-                'Score':      r['Score'],
-                'author':     r.get('Author') or '',
-                'cover':      r.get('CoverMedium') or '',
-                'lib_data':   {},
-                'has_lcpl':   False,
+                'MangaID':     r['MangaID'],
+                'Title':       t,
+                'Volumes':     r['Volumes'],
+                'Type':        r['Type'],
+                'Members':     r['Members'],
+                'Score':       r['Score'],
+                'author':      r.get('Author') or '',
+                'cover':       r.get('CoverMedium') or '',
+                'lib_data':    {},
+                'has_lcpl':    False,
                 'has_broward': False,
-                'scraped_at': None,
+                'scraped_at':  None,
             }
 
         td = titles_map[t]

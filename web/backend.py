@@ -140,12 +140,12 @@ def admin():
 
 
 def _handle_admin_post():
-    # Support both JSON body (postJson) and FormData (rescrapeSelected)
+    # FIX #2: parse JSON body once here, pass it down — no second get_json call in helpers
     json_body = request.get_json(silent=True) or {}
-    action = request.form.get('action') or json_body.get('action')
+    action    = request.form.get('action') or json_body.get('action')
 
-    if action in ('scrape', 'scrape_broward'):
-        return _start_scrape_job(action)
+    if action in ('scrape_leon', 'scrape_broward'):
+        return _start_scrape_job(action, json_body)
 
     if action == 'get_manga':
         offset = json_body.get('offset', request.form.get('offset', '0'))
@@ -162,14 +162,12 @@ def _handle_admin_post():
     return jsonify({'ok': False, 'message': 'Unknown action'}), 400
 
 
-def _start_scrape_job(action: str):
+def _start_scrape_job(action: str, json_body: dict):
+    # FIX #2: json_body is passed in, not re-parsed from request
     is_broward  = action == 'scrape_broward'
     script      = 'broward_scraper.py' if is_broward else 'leon_scraper.py'
     lib_pattern = '%Broward%' if is_broward else '%Leon%'
 
-    # Safely extract variables from EITHER a JSON payload or standard Form Data
-    json_body = request.get_json(silent=True) or {}
-    
     range_str = (request.form.get('range') or json_body.get('range', '')).strip()
     manga_id  = (request.form.get('manga_id') or json_body.get('manga_id', '')).strip()
     only_new  = (request.form.get('only_new') or json_body.get('only_new')) == '1'
@@ -177,35 +175,32 @@ def _start_scrape_job(action: str):
     cmd = [sys.executable, str(SCRIPTS_DIR / script)]
 
     if manga_id:
-        # Used exclusively by the "Find & Re-scrape Title" UI
+        # Used exclusively by the "Find & Re-scrape Title" UI — no range needed
         cmd.extend(['--manga-ids', manga_id])
-        
+
     elif range_str:
-        # Used by the main job cards
         lo, hi = parse_range_str(range_str, _titles_count())
-        
+
         if only_new:
             missing_ids = _missing_manga_ids(lib_pattern)
             if not missing_ids:
                 label = 'Broward' if is_broward else 'LCPL'
                 return jsonify({'ok': False, 'message': f'All titles already have {label} data'}), 400
-                
-            # Filter the missing IDs to ONLY include those inside the requested range
+
             all_ids   = [r['MangaID'] for r in execute_query('SELECT MangaID FROM manga ORDER BY MangaID')]
             valid_ids = set(all_ids[lo - 1:hi])
             missing_ids = [m for m in missing_ids if m in valid_ids]
-            
+
             if not missing_ids:
                 return jsonify({'ok': False, 'message': f'No new titles missing in range {range_str}'}), 400
-                
-            # Pass the precise list of missing IDs to the scraper
+
             cmd.extend(['--manga-ids', ','.join(map(str, missing_ids))])
         else:
-            # Standard range scrape
             cmd.extend(['--range', f'{lo}-{hi}'])
+
     else:
-        # Fails safely if it genuinely receives no target
-        return jsonify({'ok': False, 'message': 'A range is required to start a bulk scrape.'}), 400
+        # A range is always required for bulk scrapes — never scrape everything blindly
+        return jsonify({'ok': False, 'message': 'A range is required (e.g. 1-50)'}), 400
 
     def _on_scrape_done(job_name: str, ok: bool) -> None:
         _invalidate_missing_cache()
@@ -269,7 +264,7 @@ def api_stats():
 
         last_scraped = 'Never scraped'
         for log in reversed(read_job_history()):
-            if log['job'] in ('scrape', 'scrape_broward') and log['status'] == 'done':
+            if log['job'] in ('scrape_leon', 'scrape_broward') and log['status'] == 'done':
                 try:
                     dt = datetime.fromisoformat(log['at'])
                     last_scraped = dt.strftime('Scraped %b %-d at %-I:%M %p')
@@ -549,7 +544,9 @@ def api_mal_mangalist_status(job_id: str):
     return jsonify({'ok': True, 'status': 'done', 'data': data})
 
 
+# FIX #11: MAL filter endpoints are session-mutating POSTs — protect with CSRF
 @app.route('/api/mal/set_filter', methods=['POST'])
+@csrf_protect
 def api_mal_set_filter():
     ip = client_ip()
     if rate_limited(f'mal_filter:{ip}', limit=60, window=60):
@@ -575,7 +572,9 @@ def api_mal_set_filter():
     return jsonify({'ok': True})
 
 
+# FIX #11: same — session-mutating POST needs CSRF protection
 @app.route('/api/mal/clear_filter', methods=['POST'])
+@csrf_protect
 def api_mal_clear_filter():
     session.pop('mal_data',    None)
     session.pop('mal_filters', None)

@@ -95,10 +95,6 @@ BROWARD_BRANCH_MAPPING = {
     "Weston Branch": "Weston Branch",
 }
 
-# Broward uses a single virtual branch (no per-branch breakdown)
-BROWARD_LIBRARY_ID = 2
-BROWARD_BRANCH_ID  = 8   # "Broward County Library (All Branches)"
-
 SCRAPE_DELAY     = 2
 MAX_RETRIES      = 3
 REQUEST_TIMEOUT  = 30

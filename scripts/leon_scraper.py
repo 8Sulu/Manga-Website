@@ -4,7 +4,6 @@ scripts/leon_scraper.py  —  Leon County Public Library manga scraper
 Fetches per-branch availability from the SirsiDynix ILSWS REST API.
 
 Usage:
-    python leon_scraper.py                      scrape all titles
     python leon_scraper.py --range 1-50         scrape lines 1 to 50
     python leon_scraper.py --manga-ids 21,42    scrape specific MangaIDs
     python leon_scraper.py --range 1-50 --debug write raw ILSWS JSON to debug/
@@ -200,12 +199,12 @@ def parse_title_info(
     manga_type: str,
     html_volume: int | None = None,
 ) -> tuple:
-    books            = []
+    books             = []
     valid_branch_keys = {k.upper() for k in BRANCH_MAPPING}
 
     for title_entry in data.get("TitleInfo", []):
         for call in title_entry.get("CallInfo", []):
-            library_id  = (call.get("libraryID") or "").strip().upper()
+            library_id = (call.get("libraryID") or "").strip().upper()
             if library_id not in valid_branch_keys:
                 continue
 
@@ -248,7 +247,7 @@ def scrape(
 
     if manga_ids:
         target_ids      = set(manga_ids)
-        pairs_to_scrape = [p for p in all_pairs if p[3] in target_ids]
+        pairs_to_scrape = [p for p in all_pairs if p.manga_id in target_ids]
     else:
         pairs_to_scrape = all_pairs[max(0, start - 1):end]
 
@@ -307,6 +306,31 @@ def scrape(
 
 # ── Database write with batch commits ─────────────────────────────────────────
 
+def _reconnect(conn, cursor):
+    """
+    Ping the connection and reconnect if it has gone away.
+    Returns (conn, cursor) — always use the returned pair, never the originals.
+    """
+    try:
+        conn.ping(reconnect=True, attempts=3, delay=5)
+        # ping may have swapped the underlying socket; get a fresh cursor
+        cursor.close()
+        return conn, conn.cursor()
+    except Exception as e:
+        log.warning(f"DB ping failed, opening fresh connection: {e}")
+        try:
+            cursor.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
+        conn   = get_connection()
+        cursor = conn.cursor()
+        return conn, cursor
+
+
 def write_to_db(books: list) -> str:
     if not books:
         return "no books to write"
@@ -319,10 +343,12 @@ def write_to_db(books: list) -> str:
     cursor.execute("SELECT LibraryID FROM library WHERE LibraryName LIKE '%Leon%' LIMIT 1")
     row = cursor.fetchone()
     if not row:
+        cursor.close()
         conn.close()
         return "error: LCPL library not found in DB — run a DB reset first"
     lcpl_library_id = row[0]
 
+    # ── Delete old data for all affected titles up-front ─────────────────────
     manga_ids    = list({b["manga_id"] for b in books})
     placeholders = ",".join(["%s"] * len(manga_ids))
 
@@ -343,9 +369,9 @@ def write_to_db(books: list) -> str:
 
     scraped_at = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
 
-    inserted    = skipped     = 0
-    batch_rows  = 0
-    manga_batch = 0
+    inserted         = skipped = 0
+    batch_rows       = 0
+    manga_batch      = 0
     current_manga_id: int | None = None
 
     for b in books:
@@ -375,11 +401,13 @@ def write_to_db(books: list) -> str:
                 log.warning(f"  Unknown branch key '{branch_key}' — not in BRANCH_MAPPING")
 
         if manga_batch >= DB_BATCH_SIZE:
+            conn, cursor = _reconnect(conn, cursor)
             conn.commit()
             print(f"  [DB] committed batch ({manga_batch} titles, {batch_rows} rows)", flush=True)
             manga_batch = batch_rows = 0
 
     if batch_rows > 0:
+        conn, cursor = _reconnect(conn, cursor)
         conn.commit()
         print(f"  [DB] final commit ({manga_batch} titles, {batch_rows} rows)", flush=True)
 
@@ -391,17 +419,20 @@ def write_to_db(books: list) -> str:
         msg += f" ({skipped} branch keys unrecognized — check BRANCH_MAPPING in settings.py)"
     return msg
 
+
+# ── Entry point ───────────────────────────────────────────────────────────────
+
 if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Leon County Public Library manga scraper")
     parser.add_argument("--debug", action="store_true", help="Write raw ILSWS JSON to debug/")
-    
-    # Force the user/app to explicitly choose either a range OR a manga_id for rescraping
+
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--range", type=str, help="Scrape a range of titles (e.g. 1-50)")
+    group.add_argument("--range",     type=str,
+                       help="Scrape a range of titles (e.g. 1-50)")
     group.add_argument("--manga-ids", type=lambda s: [int(x) for x in s.split(",")],
-                        metavar="ID,ID", help="Comma-separated MangaIDs for rescraping")
+                       metavar="ID,ID", help="Comma-separated MangaIDs")
     args = parser.parse_args()
 
     if args.manga_ids:
@@ -409,7 +440,7 @@ if __name__ == "__main__":
     else:
         try:
             lo, hi = args.range.split("-")
-            books = scrape(start=max(1, int(lo)), end=int(hi), debug=args.debug)
+            books  = scrape(start=max(1, int(lo)), end=int(hi), debug=args.debug)
         except (ValueError, IndexError):
             print("Invalid --range format. Use START-END (e.g. --range 1-50)")
             raise SystemExit(1)

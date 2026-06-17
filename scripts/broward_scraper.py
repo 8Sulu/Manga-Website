@@ -5,11 +5,10 @@ Reverse-engineers the SirsiDynix Enterprise two-step AJAX flow to fetch
 per-branch, per-volume availability and writes it to MySQL.
 
 Usage:
-    python broward_scraper.py                     scrape all titles
     python broward_scraper.py --range 1-50        scrape lines 1 to 50
     python broward_scraper.py --manga-ids 21,42   scrape specific MangaIDs
-    python broward_scraper.py --output audit.csv  also write results to CSV
-    python broward_scraper.py --debug             verbose URL/copy logging
+    python broward_scraper.py --range 1-50 --output audit.csv
+    python broward_scraper.py --manga-ids 21 --debug
 """
 from __future__ import annotations
 
@@ -56,32 +55,74 @@ ON_SHELF_STATUSES = {
     "graphic novels", "young adult", "children",
 }
 
-DB_BATCH_SIZE = 20   # commit to DB after every N titles
+DB_BATCH_SIZE      = 20
+LOOKUP_MAX_RETRIES = 3
+LOOKUP_RETRY_DELAY = 2
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
 
-def _load_broward_branch_map() -> dict[str, int]:
+def _load_broward_ids() -> tuple[int, dict[str, int]]:
+    """
+    Return (broward_library_id, branch_name_to_id_map) from the DB.
+    Raises RuntimeError if Broward is not seeded.
+    """
     conn = get_connection()
     cur  = conn.cursor(dictionary=True)
+
+    cur.execute("SELECT LibraryID FROM library WHERE LibraryName LIKE '%Broward%' LIMIT 1")
+    row = cur.fetchone()
+    if not row:
+        cur.close()
+        conn.close()
+        raise RuntimeError(
+            "Broward library not found in DB. "
+            "Run a DB reset to seed libraries.csv / branches.csv first."
+        )
+    broward_library_id = row["LibraryID"]
+
     cur.execute(
         "SELECT b.BranchID, b.BranchName FROM branch b "
-        "JOIN library l ON b.LibraryID = l.LibraryID "
-        "WHERE l.LibraryName LIKE %s",
-        ("%Broward%",),
+        "WHERE b.LibraryID = %s",
+        (broward_library_id,),
     )
-    rows = cur.fetchall()
+    branch_rows = cur.fetchall()
     cur.close()
     conn.close()
 
-    if not rows:
+    if not branch_rows:
         raise RuntimeError(
             "No Broward branches found in DB. "
             "Run a DB reset to seed libraries.csv / branches.csv first."
         )
 
-    log.info(f"Loaded {len(rows)} Broward branch(es) from DB")
-    return {r["BranchName"]: r["BranchID"] for r in rows}
+    log.info(f"Loaded {len(branch_rows)} Broward branch(es) from DB (library ID {broward_library_id})")
+    branch_map = {r["BranchName"]: r["BranchID"] for r in branch_rows}
+    return broward_library_id, branch_map
+
+
+def _reconnect(conn, cursor):
+    """
+    Ping the connection and reconnect if it has gone away.
+    Returns (conn, cursor) — always use the returned pair, never the originals.
+    """
+    try:
+        conn.ping(reconnect=True, attempts=3, delay=5)
+        cursor.close()
+        return conn, conn.cursor()
+    except Exception as e:
+        log.warning(f"DB ping failed, opening fresh connection: {e}")
+        try:
+            cursor.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
+        conn   = get_connection()
+        cursor = conn.cursor()
+        return conn, cursor
 
 
 def _upsert_results(
@@ -319,38 +360,55 @@ def fetch_item_availability(
         ("isd", "true"),
         ("h",   "8"),
     ]
-
     lookup_headers = {**HEADERS, "sdcsrf": sdcsrf, "Content-Length": "0"}
 
     if debug:
         print(f"[DEBUG] lookuptitleinfo: {info_url}")
 
-    try:
-        r = session.post(info_url, params=params, headers=lookup_headers, timeout=15)
-        if r.status_code != 200:
-            log.warning(f"  lookuptitleinfo {item_id} → HTTP {r.status_code}")
+    for attempt in range(LOOKUP_MAX_RETRIES):
+        try:
+            r = session.post(info_url, params=params, headers=lookup_headers, timeout=15)
+
+            if r.status_code == 200:
+                data = r.json()
+                copies = [
+                    {
+                        "library":  (rec.get("LIBRARY") or "").strip(),
+                        "status":   (rec.get("SD_ITEM_STATUS") or "").strip(),
+                        "on_shelf": (rec.get("SD_ITEM_STATUS") or "").strip().lower()
+                                    in ON_SHELF_STATUSES,
+                    }
+                    for rec in data.get("childRecords", [])
+                ]
+                if debug:
+                    print(f"[DEBUG] item {item_id}: {len(copies)} copies")
+                    for c in copies:
+                        print(f"  [{'✓' if c['on_shelf'] else '✗'}] {c['library']} — {c['status']}")
+                return copies
+
+            if r.status_code in (429, 503):
+                wait = LOOKUP_RETRY_DELAY * (2 ** attempt)
+                log.warning(f"  lookuptitleinfo {item_id} → HTTP {r.status_code}, "
+                             f"retry {attempt + 1}/{LOOKUP_MAX_RETRIES} in {wait}s")
+                time.sleep(wait)
+                continue
+
+            log.warning(f"  lookuptitleinfo {item_id} → HTTP {r.status_code} (not retrying)")
             return []
 
-        data = r.json()
-        copies = [
-            {
-                "library":  (rec.get("LIBRARY") or "").strip(),
-                "status":   (rec.get("SD_ITEM_STATUS") or "").strip(),
-                "on_shelf": (rec.get("SD_ITEM_STATUS") or "").strip().lower() in ON_SHELF_STATUSES,
-            }
-            for rec in data.get("childRecords", [])
-        ]
+        except (requests.exceptions.ConnectionError,
+                requests.exceptions.Timeout) as e:
+            wait = LOOKUP_RETRY_DELAY * (2 ** attempt)
+            log.warning(f"  lookuptitleinfo {item_id} network error ({type(e).__name__}), "
+                        f"retry {attempt + 1}/{LOOKUP_MAX_RETRIES} in {wait}s")
+            time.sleep(wait)
 
-        if debug:
-            print(f"[DEBUG] item {item_id}: {len(copies)} copies")
-            for c in copies:
-                print(f"  [{'✓' if c['on_shelf'] else '✗'}] {c['library']} — {c['status']}")
+        except Exception as e:
+            log.warning(f"  lookuptitleinfo error {item_id}: {e}")
+            return []
 
-        return copies
-
-    except (ValueError, Exception) as e:
-        log.warning(f"  lookuptitleinfo error {item_id}: {e}")
-        return []
+    log.error(f"  lookuptitleinfo {item_id} failed after {LOOKUP_MAX_RETRIES} attempts")
+    return []
 
 
 # ── Aggregate copies ──────────────────────────────────────────────────────────
@@ -405,26 +463,14 @@ def process_batch(args: argparse.Namespace) -> None:
         return
 
     try:
-        branch_map = _load_broward_branch_map()
+        broward_library_id, branch_map = _load_broward_ids()
     except RuntimeError as e:
         print(f"[-] {e}")
         return
 
-    conn = get_connection()
-    cur  = conn.cursor(dictionary=True)
-    cur.execute("SELECT LibraryID FROM library WHERE LibraryName LIKE '%Broward%' LIMIT 1")
-    row = cur.fetchone()
-    cur.close()
-    conn.close()
-
-    if not row:
-        print("[-] Broward library not found in DB.")
-        return
-    broward_library_id = row["LibraryID"]
-
     if args.manga_ids:
         target_ids = set(args.manga_ids)
-        pairs = [p for p in all_pairs if p[3] in target_ids]
+        pairs = [p for p in all_pairs if p.manga_id in target_ids]
     else:
         try:
             s, e  = args.range.split("-")
@@ -461,7 +507,7 @@ def process_batch(args: argparse.Namespace) -> None:
         "Referer":         f"{BASE_URL}{CLIENT}",
     })
 
-    batch_count = 0   # titles written since last commit
+    batch_count = 0
 
     for progress, (idx, title, author, manga_id, manga_type) in enumerate(pairs, 1):
         if not author:
@@ -479,11 +525,12 @@ def process_batch(args: argparse.Namespace) -> None:
 
         item_copies: list[tuple[int, list[dict]]] = []
         for j, item in enumerate(items, 1):
-            print(f"  [{j}/{len(items)}] fetching item {item['item_id']} (vol {item['volume']})", flush=True)
+            print(f"  [{j}/{len(items)}] fetching item {item['item_id']} (vol {item['volume']})",
+                  flush=True)
             copies = fetch_item_availability(
                 http_session, item["item_id"], item["index"],
                 title, author, sdcsrf, args.debug,
-            )    
+            )
             item_copies.append((item["volume"], copies))
             if csv_writer:
                 for c in copies:
@@ -524,8 +571,8 @@ def process_batch(args: argparse.Namespace) -> None:
                                       volume_branch_map, scraped_at)
                 batch_count += 1
 
-                # ── Batch commit every DB_BATCH_SIZE titles ───────────────────
                 if batch_count >= DB_BATCH_SIZE:
+                    db_conn, cursor = _reconnect(db_conn, cursor)
                     db_conn.commit()
                     print(f"  [DB] committed batch of {batch_count} titles", flush=True)
                     batch_count = 0
@@ -539,9 +586,9 @@ def process_batch(args: argparse.Namespace) -> None:
         else:
             print("  [--] No matched branches to store", flush=True)
 
-    # ── Final commit for any remaining titles ─────────────────────────────────
     if batch_count > 0:
         try:
+            db_conn, cursor = _reconnect(db_conn, cursor)
             db_conn.commit()
             print(f"[DB] final commit ({batch_count} title(s))", flush=True)
         except Exception as e:
@@ -554,14 +601,18 @@ def process_batch(args: argparse.Namespace) -> None:
         csv_file.close()
     print("\n[*] Done.")
 
+
+# ── Entry point ───────────────────────────────────────────────────────────────
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Broward County Library manga scraper")
     parser.add_argument("--debug",  action="store_true", help="Verbose URL/copy logging")
     parser.add_argument("--output", type=str,            help="Also write results to CSV")
 
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--range",     type=str, help="Title range (e.g. 1-50)")
+    group.add_argument("--range",     type=str,
+                       help="Title range (e.g. 1-50)")
     group.add_argument("--manga-ids", type=lambda s: [int(x) for x in s.split(",")],
-                       metavar="ID,ID", help="Comma-separated MangaIDs for rescraping")
+                       metavar="ID,ID", help="Comma-separated MangaIDs")
 
     process_batch(parser.parse_args())

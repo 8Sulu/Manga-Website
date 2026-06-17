@@ -38,7 +38,7 @@ from typing import Callable
 
 # ── Valid job identifiers ──────────────────────────────────────────────────────
 
-JOB_NAMES: frozenset[str] = frozenset({'scrape', 'scrape_broward', 'get_manga'})
+JOB_NAMES: frozenset[str] = frozenset({'scrape_leon', 'scrape_broward', 'get_manga'})
 
 # How long (seconds) with no stdout output before the watchdog kills the job.
 # Import errors / early crashes typically produce nothing then the process dies,

@@ -1,5 +1,6 @@
 /**
- * static/login.js — Admin login page JS
+ * static/admin_login.js — Admin login page JS
+ * (renamed from login.js for consistency with admin_login.html / admin_login.css)
  */
 
 function togglePw() {

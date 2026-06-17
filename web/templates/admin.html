@@ -46,7 +46,7 @@
 
     <div class="admin-job-card">
       <div class="admin-job-title">Leon County (LCPL)</div>
-      <form id="form-scrape" onsubmit="event.preventDefault();submitScrapeForm('scrape')">
+      <form id="form-scrape_leon" onsubmit="event.preventDefault();submitScrapeForm('scrape_leon')">
         <label class="admin-label">Range (e.g. 1–50) <span style="color:var(--red)">*Required</span>
           <input class="admin-input" name="range" type="text" placeholder="1-50" required>
         </label>
@@ -54,15 +54,15 @@
           <input type="checkbox" name="only_new" value="1"> Only scrape missing titles
         </label>
         <div class="admin-btn-row">
-          <button id="start-btn-scrape" class="btn primary" type="submit">▶ Scrape LCPL</button>
-          <button id="stop-btn-scrape"  class="btn danger"  type="button"
-                  style="display:none" onclick="stopJob('scrape')">■ Stop</button>
+          <button id="start-btn-scrape_leon" class="btn primary" type="submit">▶ Scrape LCPL</button>
+          <button id="stop-btn-scrape_leon"  class="btn danger"  type="button"
+                  style="display:none" onclick="stopJob('scrape_leon')">■ Stop</button>
         </div>
       </form>
       <div class="job-progress-wrap">
-        <div class="job-progress-bar" id="progress-scrape" style="display:none;width:0%"></div>
+        <div class="job-progress-bar" id="progress-scrape_leon" style="display:none;width:0%"></div>
       </div>
-      <div class="job-status-text" id="status-scrape"></div>
+      <div class="job-status-text" id="status-scrape_leon"></div>
     </div>
 
     <div class="admin-job-card">
@@ -126,7 +126,7 @@
         <span class="rescrape-id-badge" id="rescrape-id-badge"></span>
       </div>
       <div class="admin-btn-row" id="rescrape-btns" style="display:none">
-        <button class="btn primary" onclick="rescrapeSelected('scrape')">▶ Re-scrape LCPL</button>
+        <button class="btn primary" onclick="rescrapeSelected('scrape_leon')">▶ Re-scrape LCPL</button>
         <button class="btn primary" style="color:var(--amber);border-color:var(--amber)"
                 onclick="rescrapeSelected('scrape_broward')">▶ Re-scrape Broward</button>
         <button class="btn" onclick="rescrapeClear()" title="Clear selection">✕</button>
@@ -182,7 +182,7 @@
 
 </div><!-- /.shell -->
 
-<script>const JOB_NAMES = {{ ['scrape', 'scrape_broward', 'get_manga'] | tojson }};</script>
+<script>const JOB_NAMES = {{ ['scrape_leon', 'scrape_broward', 'get_manga'] | tojson }};</script>
 <script src="{{ url_for('static', filename='admin.js') }}" defer></script>
 </body>
 </html>

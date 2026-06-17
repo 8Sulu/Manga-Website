@@ -5,6 +5,12 @@
  */
 import { buildLcplUrl, buildBrowardUrl, buildVolUrl } from './catalog_url.js';
 
+// ── CSRF token (FIX #11: read from meta tag injected by results.html) ──────────
+
+function csrfToken() {
+    return document.querySelector('meta[name="csrf-token"]')?.content || '';
+}
+
 // ── MAL panel toggle ───────────────────────────────────────────────────────────
 
 function toggleMalPanel() {
@@ -125,10 +131,14 @@ async function loadMalList() {
 
         const data = await _pollMalJob(startJson.job_id);
 
+        // FIX #11: include CSRF token in session-mutating POST
         const setResp = await fetch('/api/mal/set_filter', {
             method:  'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify({
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': csrfToken(),
+            },
+            body: JSON.stringify({
                 data:    data,
                 filters: { reading: '', completed: '', on_hold: '', dropped: '', plan_to_read: '' },
             }),
@@ -186,10 +196,14 @@ async function applyMalFilters() {
         filters[p.dataset.status] = p.dataset.state || '';
     });
     try {
+        // FIX #11: include CSRF token in session-mutating POST
         const resp = await fetch('/api/mal/set_filter', {
             method:  'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify({ filters }),
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': csrfToken(),
+            },
+            body: JSON.stringify({ filters }),
         });
         if (!resp.ok) throw new Error('Failed to save filter');
         const url = new URL(window.location.href);
@@ -203,7 +217,11 @@ async function applyMalFilters() {
 
 async function clearMalFilter() {
     try {
-        await fetch('/api/mal/clear_filter', { method: 'POST' });
+        // FIX #11: include CSRF token in session-mutating POST
+        await fetch('/api/mal/clear_filter', {
+            method:  'POST',
+            headers: { 'X-CSRF-Token': csrfToken() },
+        });
         const url = new URL(window.location.href);
         url.searchParams.delete('page');
         window.location.href = url.toString();
