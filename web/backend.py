@@ -3,6 +3,7 @@ from flask import (Flask, render_template, request, jsonify,
 from flask_session import Session
 import sys, functools, os, secrets, threading, time
 from pathlib import Path
+from cachelib.file import FileSystemCache
 from datetime import datetime, timezone
 
 from config.settings import DATA_DIR, SCRIPTS_DIR
@@ -24,15 +25,13 @@ ADMIN_PASSWORD    = os.getenv('ADMIN_PASSWORD', '')
 _SESSION_DIR = DATA_DIR / 'flask_sessions'
 _SESSION_DIR.mkdir(parents=True, exist_ok=True)
 app.config.update(
-    SESSION_TYPE             = 'filesystem',
-    SESSION_FILE_DIR         = str(_SESSION_DIR),
-    SESSION_FILE_THRESHOLD   = 500,
+    SESSION_TYPE             = 'cachelib',
     SESSION_PERMANENT        = False,
-    SESSION_USE_SIGNER       = True,
-    SESSION_COOKIE_SECURE    = True,
+    SESSION_COOKIE_SECURE    = os.getenv('SESSION_COOKIE_SECURE', 'true').lower() == 'true',
     SESSION_COOKIE_HTTPONLY  = True,
     SESSION_COOKIE_SAMESITE  = 'Lax',
 )
+app.config['SESSION_CACHELIB'] = FileSystemCache(cache_dir=str(_SESSION_DIR), threshold=500)
 Session(app)
 register_filters(app)
 
@@ -123,17 +122,21 @@ def admin():
     if request.method == 'POST':
         return _handle_admin_post()
 
-    manga_per_library = execute_query("""
-        SELECT l.LibraryName, b.BranchName,
-               COUNT(DISTINCT CONCAT(a.MangaID, '-', a.Volume)) AS VolumeCount
-        FROM branch b
-        JOIN library l ON b.LibraryID = l.LibraryID
-        JOIN branch_availability_status bas ON b.BranchID = bas.BranchID
-        JOIN availability a ON bas.AvailabilityID = a.AvailabilityID
-        GROUP BY l.LibraryName, b.BranchName
-        HAVING COUNT(DISTINCT CONCAT(a.MangaID, '-', a.Volume)) > 0
-        ORDER BY l.LibraryName, VolumeCount DESC
-    """)
+    try:
+        manga_per_library = execute_query("""
+            SELECT l.LibraryName, b.BranchName,
+                   COUNT(DISTINCT CONCAT(a.MangaID, '-', a.Volume)) AS VolumeCount
+            FROM branch b
+            JOIN library l ON b.LibraryID = l.LibraryID
+            JOIN branch_availability_status bas ON b.BranchID = bas.BranchID
+            JOIN availability a ON bas.AvailabilityID = a.AvailabilityID
+            GROUP BY l.LibraryName, b.BranchName
+            HAVING COUNT(DISTINCT CONCAT(a.MangaID, '-', a.Volume)) > 0
+            ORDER BY l.LibraryName, VolumeCount DESC
+        """)
+    except Exception:
+        manga_per_library = []
+
     return render_template('admin.html',
                            manga_per_library=manga_per_library,
                            job_history=list(reversed(read_job_history()))[:30])

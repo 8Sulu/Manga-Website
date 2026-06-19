@@ -189,8 +189,7 @@ def item_status(current_loc: str, due_date) -> str:
         return "On Hold"
     if "TRANSIT" in loc:
         return "In Transit"
-    return "Graphic Novel - Young Adult Fiction"
-
+    return "Available"
 
 def parse_title_info(
     data: dict,

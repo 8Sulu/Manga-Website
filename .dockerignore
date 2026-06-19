@@ -1,0 +1,30 @@
+# Version control / editor
+.git
+.gitignore
+
+# Secrets — never bake into an image
+.env
+.env.*
+!.env.example
+
+# Local data, logs, and caches (mounted in via volume at runtime instead)
+data/
+debug/
+curl_broward/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Python environments
+venv/
+.venv/
+
+# Docs (not needed inside the image)
+README.md
+
+# Misc local scripts
+sync.sh
+line_count.sh
+code.txt

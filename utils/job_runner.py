@@ -188,7 +188,8 @@ def _run_subprocess(job_name: str, cmd: list[str]) -> None:
             history_msg = line[:200]
 
         with _jobs_lock:
-            if _jobs[job_name].get('stop_requested'):
+            job = _jobs.get(job_name)
+            if job and job.get('stop_requested'):
                 proc.terminate()
                 stopped = True
                 break

@@ -1,0 +1,88 @@
+# .github/workflows/ci.yml
+#
+# Runs on every push and pull request.
+# Three jobs run in parallel after the test matrix finishes:
+#   lint    — ruff (fast linter, replaces flake8 + isort + pyupgrade)
+#   typecheck — mypy in strict-ish mode on the pure-logic modules
+#   test    — pytest with coverage, uploads to a job summary
+#
+# MySQL is NOT needed — all DB calls are patched in conftest.py.
+
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - run: pip install ruff
+      - run: ruff check .
+      - run: ruff format --check .
+
+  typecheck:
+    name: Type check (mypy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - run: pip install -e ".[dev]" gunicorn flask-session
+      - run: |
+          mypy \
+            utils/scraper_utils.py \
+            utils/format_utils.py \
+            utils/admin_utils.py \
+            utils/search_utils.py \
+            utils/job_runner.py \
+            --ignore-missing-imports \
+            --no-strict-optional
+
+  test:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]" gunicorn flask-session
+
+      - name: Run tests with coverage
+        run: |
+          python -m pytest \
+            --tb=short \
+            --cov=utils --cov=web \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: matrix.python-version == '3.13'
+        with:
+          name: coverage-report
+          path: coverage.xml
+          retention-days: 7
