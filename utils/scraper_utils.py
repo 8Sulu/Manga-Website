@@ -12,6 +12,7 @@ Exports:
     extract_volume()    — parse a volume number from any title/call-number string
     load_title_author_map() — ordered list of TitleRow from the manga table
 """
+
 from __future__ import annotations
 
 import re
@@ -23,9 +24,9 @@ from utils.database_utils import execute_query
 # ── Status priority ───────────────────────────────────────────────────────────
 
 STATUS_PRIORITY: dict[str, int] = {
-    'Available':   2,
-    'On Hold':     1,
-    'Checked Out': 0,
+    "Available": 2,
+    "On Hold": 1,
+    "Checked Out": 0,
 }
 
 
@@ -35,25 +36,27 @@ STATUS_PRIORITY: dict[str, int] = {
 # "Non-Youth Fiction" matches "Youth", "Young Adult Non-Fiction" matches
 # "Adult".  Exact matching against the lowercased string prevents this.
 
-_ON_SHELF_EXACT: frozenset[str] = frozenset({
-    "general collection",
-    "new materials",
-    "reference",
-    "graphic novels",
-    "young adult",
-    "children",
-    "juvenile",
-    "easy",
-    "oversize",
-    "paperback",
-    "manga",
-    "teen",
-})
+_ON_SHELF_EXACT: frozenset[str] = frozenset(
+    {
+        "general collection",
+        "new materials",
+        "reference",
+        "graphic novels",
+        "young adult",
+        "children",
+        "juvenile",
+        "easy",
+        "oversize",
+        "paperback",
+        "manga",
+        "teen",
+    }
+)
 
 # Fallback regex for less common but recognisable on-shelf phrasings.
 # Only reached when the exact set doesn't match.
 _ON_SHELF_RE = re.compile(
-    r'\b(on\s+shelf|available|checked\s+in|in\s+library|in\s+stacks)\b',
+    r"\b(on\s+shelf|available|checked\s+in|in\s+library|in\s+stacks)\b",
     re.IGNORECASE,
 )
 
@@ -68,73 +71,74 @@ def normalize_status(raw: str) -> str:
     Falls back to a word-boundary regex for less common on-shelf phrasings.
     """
     if not raw:
-        return 'Checked Out'
+        return "Checked Out"
 
     s = raw.strip().lower()
 
     # Fast path: direct exact match
     if s in _ON_SHELF_EXACT:
-        return 'Available'
+        return "Available"
 
     # Checked-out / due-date indicators
-    if any(kw in s for kw in ('checked out', 'checkedout', 'due ', 'overdue')):
-        return 'Checked Out'
+    if any(kw in s for kw in ("checked out", "checkedout", "due ", "overdue")):
+        return "Checked Out"
 
-    if 'hold' in s and 'shelf' not in s:
-        return 'On Hold'
+    if "hold" in s and "shelf" not in s:
+        return "On Hold"
 
-    if 'transit' in s:
-        return 'Checked Out'      # in-transit → treat as unavailable
+    if "transit" in s:
+        return "Checked Out"  # in-transit → treat as unavailable
 
     # Secondary regex for less common "on shelf" phrasings
     if _ON_SHELF_RE.search(raw):
-        return 'Available'
+        return "Available"
 
     # Default: treat as unavailable if we can't positively identify it
-    return 'Checked Out'
+    return "Checked Out"
 
 
 # ── Branch display names ──────────────────────────────────────────────────────
 
 # Checked in order — first match wins.
 _BRANCH_SHORT_MAP: list[tuple[str, str]] = [
-    ("main",        "Main"),
-    ("central",     "Central"),
-    ("downtown",    "Downtown"),
-    ("north",       "North"),
-    ("south",       "South"),
-    ("east",        "East"),
-    ("west",        "West"),
-    ("beach",       "Beach"),
-    ("airport",     "Airport"),
-    ("carver",      "Carver"),
-    ("african",     "African"),
-    ("lauderdale",  "Laud."),
-    ("pompano",     "Pompano"),
-    ("deerfield",   "Deerfield"),
-    ("tamarac",     "Tamarac"),
-    ("plantation",  "Plant."),
-    ("davie",       "Davie"),
-    ("cooper",      "Cooper"),
-    ("weston",      "Weston"),
-    ("miramar",     "Miramar"),
-    ("hallandale",  "Halland."),
-    ("hollywood",   "Hollywood"),
-    ("dania",       "Dania"),
-    ("pembroke",    "Pembroke"),
-    ("margate",     "Margate"),
-    ("coconut",     "Coconut"),
-    ("sunrise",     "Sunrise"),
-    ("lauderhill",  "L.Hill"),
-    ("imperial",    "Imperial"),
-    ("lakes",       "Lakes"),
-    ("regional",    "Regional"),
-    ("branch",      "Branch"),
+    ("main", "Main"),
+    ("central", "Central"),
+    ("downtown", "Downtown"),
+    ("north", "North"),
+    ("south", "South"),
+    ("east", "East"),
+    ("west", "West"),
+    ("beach", "Beach"),
+    ("airport", "Airport"),
+    ("carver", "Carver"),
+    ("african", "African"),
+    ("lauderdale", "Laud."),
+    ("pompano", "Pompano"),
+    ("deerfield", "Deerfield"),
+    ("tamarac", "Tamarac"),
+    ("plantation", "Plant."),
+    ("davie", "Davie"),
+    ("cooper", "Cooper"),
+    ("weston", "Weston"),
+    ("miramar", "Miramar"),
+    ("hallandale", "Halland."),
+    ("hollywood", "Hollywood"),
+    ("dania", "Dania"),
+    ("pembroke", "Pembroke"),
+    ("margate", "Margate"),
+    ("coconut", "Coconut"),
+    ("sunrise", "Sunrise"),
+    ("lauderhill", "L.Hill"),
+    ("imperial", "Imperial"),
+    ("lakes", "Lakes"),
+    ("regional", "Regional"),
+    ("branch", "Branch"),
 ]
 
 
-def branch_short(name: str, library_id: int | None = None,
-                 broward_library_id: int | None = None) -> str:
+def branch_short(
+    name: str, library_id: int | None = None, broward_library_id: int | None = None
+) -> str:
     """
     Return a short display label for a branch name, for use in compact vol chips.
 
@@ -150,24 +154,30 @@ def branch_short(name: str, library_id: int | None = None,
 
 # ── Novel detection ───────────────────────────────────────────────────────────
 
-_NOVEL_TYPES: frozenset[str] = frozenset({
-    "light novel", "light_novel", "novel", "ln",
-})
+_NOVEL_TYPES: frozenset[str] = frozenset(
+    {
+        "light novel",
+        "light_novel",
+        "novel",
+        "ln",
+    }
+)
 
 
 def is_novel(manga_type: str) -> bool:
-    return (manga_type or '').strip().lower() in _NOVEL_TYPES
+    return (manga_type or "").strip().lower() in _NOVEL_TYPES
 
 
 # ── TitleRow — shared return type for load_title_author_map() ─────────────────
 # FIX #5: TitleRow is kept so external callers can import it if needed,
 # and the return type annotation is accurate.
 
+
 class TitleRow(NamedTuple):
-    idx:        int
-    title:      str
-    author:     str
-    manga_id:   int
+    idx: int
+    title: str
+    author: str
+    manga_id: int
     manga_type: str
 
 
@@ -176,16 +186,14 @@ def load_title_author_map() -> list[TitleRow]:
     Return every manga row ordered by MangaID.
     Each element is a TitleRow(idx, title, author, manga_id, manga_type).
     """
-    rows = execute_query(
-        'SELECT MangaID, Title, Author, Type FROM manga ORDER BY MangaID'
-    )
+    rows = execute_query("SELECT MangaID, Title, Author, Type FROM manga ORDER BY MangaID")
     return [
         TitleRow(
-            idx        = i + 1,
-            title      = r['Title'],
-            author     = r['Author'] or '',
-            manga_id   = r['MangaID'],
-            manga_type = r['Type'] or '',
+            idx=i + 1,
+            title=r["Title"],
+            author=r["Author"] or "",
+            manga_id=r["MangaID"],
+            manga_type=r["Type"] or "",
         )
         for i, r in enumerate(rows)
     ]
@@ -194,9 +202,9 @@ def load_title_author_map() -> list[TitleRow]:
 # ── Volume number extraction ──────────────────────────────────────────────────
 
 _VOL_RE = re.compile(
-    r'(?:vol(?:ume)?\.?\s*|v\.?\s*)(\d+)'
-    r'|,\s*(\d+)$'
-    r'|\s(\d+)\s*$',
+    r"(?:vol(?:ume)?\.?\s*|v\.?\s*)(\d+)"
+    r"|,\s*(\d+)$"
+    r"|\s(\d+)\s*$",
     re.IGNORECASE,
 )
 

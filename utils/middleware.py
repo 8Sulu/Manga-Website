@@ -7,6 +7,7 @@ Exports:
     rate_limited(key, limit, window)  — sliding-window rate limiter
     client_ip()                       — best-effort client IP from headers
 """
+
 from __future__ import annotations
 
 import threading
@@ -41,8 +42,8 @@ def client_ip() -> str:
     raw socket address.
     """
     return (
-        request.headers.get('X-Real-IP')
-        or request.headers.get('X-Forwarded-For', '').split(',')[0].strip()
+        request.headers.get("X-Real-IP")
+        or request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
         or request.remote_addr
-        or 'unknown'
+        or "unknown"
     )

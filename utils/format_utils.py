@@ -7,6 +7,7 @@ import from anywhere.
 Exports:
     fmt_scraped_at(dt)  — human-readable "2d ago / today / 3w ago" label
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -30,10 +31,14 @@ def fmt_scraped_at(dt) -> str | None:
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         days = (now - dt).days
-        if days == 0:  return 'today'
-        if days == 1:  return 'yesterday'
-        if days < 7:   return f'{days}d ago'
-        if days < 31:  return f'{days // 7}w ago'
+        if days == 0:
+            return 'today'
+        if days == 1:
+            return 'yesterday'
+        if days < 7:
+            return f'{days}d ago'
+        if days < 31:
+            return f'{days // 7}w ago'
         return f'{days // 30}mo ago'
     except Exception:
         return None

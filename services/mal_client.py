@@ -5,11 +5,12 @@ from dotenv import load_dotenv
 # Load original environment variables
 load_dotenv()
 
+
 def update_env_file(new_access, new_refresh):
     """Safely updates only the token values in the .env file without wiping other variables."""
     lines = []
-    if os.path.exists('.env'):
-        with open('.env', 'r') as f:
+    if os.path.exists(".env"):
+        with open(".env", "r") as f:
             lines = f.readlines()
 
     updated_lines = []
@@ -17,10 +18,10 @@ def update_env_file(new_access, new_refresh):
     has_refresh = False
 
     for line in lines:
-        if line.startswith('MAL_ACCESS_TOKEN='):
+        if line.startswith("MAL_ACCESS_TOKEN="):
             updated_lines.append(f'MAL_ACCESS_TOKEN="{new_access}"\n')
             has_access = True
-        elif line.startswith('MAL_REFRESH_TOKEN='):
+        elif line.startswith("MAL_REFRESH_TOKEN="):
             updated_lines.append(f'MAL_REFRESH_TOKEN="{new_refresh}"\n')
             has_refresh = True
         else:
@@ -31,29 +32,30 @@ def update_env_file(new_access, new_refresh):
     if not has_refresh:
         updated_lines.append(f'MAL_REFRESH_TOKEN="{new_refresh}"\n')
 
-    with open('.env', 'w') as f:
+    with open(".env", "w") as f:
         f.writelines(updated_lines)
+
 
 def refresh_tokens():
     """Hits the MAL OAuth2 endpoint to exchange the refresh token for new access/refresh tokens."""
     print("[*] Access token expired. Attempting to refresh tokens...")
     url = "https://myanimelist.net/v1/oauth2/token"
-    
+
     data = {
         "client_id": os.getenv("MAL_CLIENT_ID"),
         "client_secret": os.getenv("MAL_CLIENT_SECRET"),
         "grant_type": "refresh_token",
-        "refresh_token": os.getenv("MAL_REFRESH_TOKEN")
+        "refresh_token": os.getenv("MAL_REFRESH_TOKEN"),
     }
-    
+
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
     response = requests.post(url, data=data, headers=headers)
-    
+
     if response.status_code == 200:
         tokens = response.json()
         new_access = tokens["access_token"]
         new_refresh = tokens["refresh_token"]
-        
+
         # Write to file and update current in-memory environment properties
         update_env_file(new_access, new_refresh)
         os.environ["MAL_ACCESS_TOKEN"] = new_access
@@ -65,10 +67,11 @@ def refresh_tokens():
         print(response.text)
         return None
 
+
 def authenticated_request(url, method="GET", **kwargs):
     """Wrapper that signs requests with Bearer tokens and handles automatic retries on 401s."""
     access_token = os.getenv("MAL_ACCESS_TOKEN")
-    
+
     headers = kwargs.get("headers", {})
     headers["Authorization"] = f"Bearer {access_token}"
     kwargs["headers"] = headers

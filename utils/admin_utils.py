@@ -7,8 +7,8 @@ Constants and helpers used exclusively by the admin routes in backend.py:
   - insert_csv()     — seed one CSV file into the DB
   - parse_range_str()— parse "1-50" / "20" range strings
 """
+
 import csv
-from pathlib import Path
 
 from config.settings import DATA_DIR
 from utils.database_utils import get_db_connection
@@ -53,36 +53,38 @@ CREATE TABLE branch_availability_status (
 """
 
 INSERT_OPS = [
-    ("manga.csv",
-     "INSERT INTO manga (MangaID, Title, Type, Volumes, Members, Score, Author, CoverMedium, CoverLarge) "
-     "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)"),
-    ("libraries.csv",
-     "INSERT INTO library (LibraryName, `URL`) VALUES (%s,%s)"),
-    ("branches.csv",
-     "INSERT INTO branch (BranchName, `Address`, LibraryID) VALUES (%s,%s,%s)"),
+    (
+        "manga.csv",
+        "INSERT INTO manga (MangaID, Title, Type, Volumes, Members, Score, Author, CoverMedium, CoverLarge) "
+        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+    ),
+    ("libraries.csv", "INSERT INTO library (LibraryName, `URL`) VALUES (%s,%s)"),
+    ("branches.csv", "INSERT INTO branch (BranchName, `Address`, LibraryID) VALUES (%s,%s,%s)"),
 ]
 
 
 # ── CSV seeder ─────────────────────────────────────────────────────────────────
 
+
 def insert_csv(filename: str, query: str) -> str:
     filepath = DATA_DIR / filename
     try:
-        with open(filepath, encoding='utf-8') as f:
+        with open(filepath, encoding="utf-8") as f:
             reader = csv.reader(f)
             next(reader)
             with get_db_connection() as conn:
                 cursor = conn.cursor()
                 for row in reader:
-                    row = [None if v.strip().upper() in ('NULL', '') else v for v in row]
+                    row = [None if v.strip().upper() in ("NULL", "") else v for v in row]
                     cursor.execute(query, tuple(row))
                 conn.commit()
-        return f'✓ {filename}'
+        return f"✓ {filename}"
     except Exception as e:
-        return f'✗ {filename}: {e}'
+        return f"✗ {filename}: {e}"
 
 
 # ── Range parser ───────────────────────────────────────────────────────────────
+
 
 def parse_range_str(s: str, max_titles: int = 9999) -> tuple[int, int]:
     """
@@ -93,12 +95,13 @@ def parse_range_str(s: str, max_titles: int = 9999) -> tuple[int, int]:
       ""       → (1, 1)
     """
     import re
-    s = s.strip().replace('\u2013', '-').replace('\u2014', '-')
+
+    s = s.strip().replace("\u2013", "-").replace("\u2014", "-")
     if not s:
         return 1, 1
     if s.isdigit():
         return 1, int(s)
-    m = re.match(r'^(\d*)-(\d*)$', s)
+    m = re.match(r"^(\d*)-(\d*)$", s)
     if m:
         lo = int(m.group(1)) if m.group(1) else 1
         hi = int(m.group(2)) if m.group(2) else max_titles

@@ -11,6 +11,7 @@ Examples:
     python get_manga.py 6,10       # offsets 0,10,20,30,40,50
     python get_manga.py 3,500      # offsets 0,500,1000  (ranks 1-1500)
 """
+
 import sys
 from pathlib import Path
 
@@ -19,7 +20,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 from services.api_service import process_manga_batch, is_stop_requested
 import logging
 
-logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
 
 def parse_args(raw: str) -> list[int]:
@@ -30,8 +31,8 @@ def parse_args(raw: str) -> list[int]:
     "3,500"  → [0, 500, 1000]             (3 runs, step 500)
     """
     raw = raw.strip()
-    if ',' in raw:
-        left, right = raw.split(',', 1)
+    if "," in raw:
+        left, right = raw.split(",", 1)
         try:
             runs = int(left)
             step = int(right)

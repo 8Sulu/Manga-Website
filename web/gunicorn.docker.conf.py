@@ -17,8 +17,8 @@
 
 import os
 
-workers      = 1
-threads      = int(os.getenv("GUNICORN_THREADS", "4"))
+workers = 1
+threads = int(os.getenv("GUNICORN_THREADS", "4"))
 worker_class = "gthread"
 
 bind = f"0.0.0.0:{os.getenv('PORT', '8000')}"
@@ -26,10 +26,10 @@ bind = f"0.0.0.0:{os.getenv('PORT', '8000')}"
 wsgi_app = "web.backend:app"
 
 accesslog = "-"
-errorlog  = "-"
-loglevel  = os.getenv("GUNICORN_LOG_LEVEL", "info")
+errorlog = "-"
+loglevel = os.getenv("GUNICORN_LOG_LEVEL", "info")
 
 # Restart a worker if a single request takes longer than 5 minutes
 # (long scrapes run in background threads, not in the request itself)
-timeout          = 300
+timeout = 300
 graceful_timeout = 30

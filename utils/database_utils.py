@@ -1,24 +1,6 @@
-"""
-utils/database_utils.py
-
-Database access helpers used throughout the application.
-
-Context managers (get_db_connection, get_db_cursor) are the preferred interface
-for Flask route handlers.  Scrapers that need direct cursor/transaction control
-(e.g. bulk-insert loops with manual commit) should use get_connection().
-
-Exports:
-    get_connection()              — raw connection (scrapers)
-    get_db_connection()           — context manager, auto-rollback/close
-    get_db_cursor()               — context manager, dict cursor, auto-commit
-    execute_query(sql, params)    — SELECT → list or single row
-    execute_update(sql, params)   — INSERT/UPDATE/DELETE → rowcount
-    get_library_ids()             — (lcpl_id, broward_id) with process-lifetime cache
-    invalidate_library_id_cache() — call after a DB reset
-"""
-from __future__ import annotations
-
 import mysql.connector
+from mysql.connector.abstracts import MySQLConnectionAbstract
+from mysql.connector.pooling import PooledMySQLConnection
 from contextlib import contextmanager
 
 from config.settings import DB_CONFIG
@@ -26,7 +8,7 @@ from config.settings import DB_CONFIG
 
 # ── Raw connection (scrapers) ──────────────────────────────────────────────────
 
-def get_connection() -> mysql.connector.MySQLConnection:
+def get_connection() -> PooledMySQLConnection | MySQLConnectionAbstract:
     """
     Return a raw mysql.connector connection.
 
@@ -37,6 +19,7 @@ def get_connection() -> mysql.connector.MySQLConnection:
 
 
 # ── Context managers (Flask routes) ───────────────────────────────────────────
+
 
 @contextmanager
 def get_db_connection():
@@ -70,6 +53,7 @@ def get_db_cursor():
 
 
 # ── One-shot helpers ───────────────────────────────────────────────────────────
+
 
 def execute_query(query: str, params=None, fetch_all: bool = True):
     """Execute a SELECT and return all rows (or one row if fetch_all=False)."""
@@ -123,14 +107,14 @@ def get_library_ids() -> tuple[int, int]:
         return _library_id_cache
 
     try:
-        rows = execute_query('SELECT LibraryID, LibraryName FROM library')
+        rows = execute_query("SELECT LibraryID, LibraryName FROM library")
         lcpl = broward = None
         for r in rows:
-            name = r['LibraryName'] or ''
-            if 'Leon' in name or 'LeRoy' in name or 'LCPL' in name:
-                lcpl = r['LibraryID']
-            elif 'Broward' in name:
-                broward = r['LibraryID']
+            name = r["LibraryName"] or ""
+            if "Leon" in name or "LeRoy" in name or "LCPL" in name:
+                lcpl = r["LibraryID"]
+            elif "Broward" in name:
+                broward = r["LibraryID"]
         if lcpl is not None and broward is not None:
             _library_id_cache = (lcpl, broward)
             return _library_id_cache
@@ -139,11 +123,9 @@ def get_library_ids() -> tuple[int, int]:
 
     # Fallback: assume insertion order 1, 2 (matches libraries.csv seed)
     try:
-        rows = execute_query(
-            'SELECT LibraryID FROM library ORDER BY LibraryID LIMIT 2'
-        )
+        rows = execute_query("SELECT LibraryID FROM library ORDER BY LibraryID LIMIT 2")
         if len(rows) >= 2:
-            _library_id_cache = (rows[0]['LibraryID'], rows[1]['LibraryID'])
+            _library_id_cache = (rows[0]["LibraryID"], rows[1]["LibraryID"])
             return _library_id_cache
     except Exception:
         pass

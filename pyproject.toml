@@ -16,15 +16,11 @@ dependencies = [
     "beautifulsoup4>=4.12",
     "lxml>=5.2",
     "gunicorn>=22.0",
-    # ↑ added — manga.service / gunicorn.conf.py / the Docker setup all run
-    # this, but it wasn't actually declared anywhere before. Without this,
-    # `pip install -e .` alone doesn't give you a working production server.
+    "python-dotenv>=1.0",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-cov", "ruff", "mypy"]
-# ↑ added pytest-cov — needed for the --cov flags in .github/workflows/ci.yml
-#   and for running `pytest --cov=utils --cov=web` locally.
 
 [tool.setuptools.packages.find]
 where   = ["."]

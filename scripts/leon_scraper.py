@@ -8,6 +8,7 @@ Usage:
     python leon_scraper.py --manga-ids 21,42    scrape specific MangaIDs
     python leon_scraper.py --range 1-50 --debug write raw ILSWS JSON to debug/
 """
+
 from __future__ import annotations
 
 import json
@@ -23,7 +24,6 @@ from bs4 import BeautifulSoup
 from config.settings import DATA_DIR, BRANCH_MAPPING
 from utils.database_utils import get_connection
 from utils.scraper_utils import (
-    STATUS_PRIORITY,
     extract_volume,
     is_novel,
     load_title_author_map,
@@ -34,28 +34,31 @@ log = logging.getLogger(__name__)
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
-CATALOG_BASE     = "https://lcpl.ent.sirsi.net/client/en_US/lcpl"
-SEARCH_BASE      = f"{CATALOG_BASE}/search/results"
-ILSWS_BASE       = "https://lcpl.sirsi.net/lcpl_ilsws/rest/standard/lookupTitleInfo"
+CATALOG_BASE = "https://lcpl.ent.sirsi.net/client/en_US/lcpl"
+SEARCH_BASE = f"{CATALOG_BASE}/search/results"
+ILSWS_BASE = "https://lcpl.sirsi.net/lcpl_ilsws/rest/standard/lookupTitleInfo"
 RESULTS_PER_PAGE = 12
-REQUEST_DELAY    = 0.5
-MAX_RETRIES      = 3
-DB_BATCH_SIZE    = 20
+REQUEST_DELAY = 0.5
+MAX_RETRIES = 3
+DB_BATCH_SIZE = 20
 
 
 # ── HTTP session ──────────────────────────────────────────────────────────────
 
+
 def make_session() -> requests.Session:
     s = requests.Session()
-    s.headers.update({
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0.0.0 Safari/537.36"
-        ),
-        "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
-    })
+    s.headers.update(
+        {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+        }
+    )
     try:
         s.get(CATALOG_BASE, timeout=20)
         s.headers.update({"Referer": CATALOG_BASE})
@@ -67,10 +70,11 @@ def make_session() -> requests.Session:
 
 # ── Step 1: search page → catalog keys ───────────────────────────────────────
 
+
 def _extract_keys_and_volume(a_tag, keys_map: dict) -> None:
-    href       = a_tag.get("href", "")
+    href = a_tag.get("href", "")
     title_text = a_tag.get("title", "")
-    html_vol   = extract_volume(title_text) or None
+    html_vol = extract_volume(title_text) or None
 
     for pattern in (
         r"SD_ILS[:\u003a](\d+)",
@@ -94,7 +98,7 @@ def fetch_catalog_keys(
     params: dict = {
         "qu": ["", f"TITLE={title}", f"AUTHOR={author}"],
         "te": "ILS",
-        "h":  "1",
+        "h": "1",
         "lm": "BOOKS",
     }
 
@@ -113,7 +117,7 @@ def fetch_catalog_keys(
             log.warning(f"  Search attempt {attempt + 1} failed: {e}")
             if attempt == MAX_RETRIES - 1:
                 return {}
-            time.sleep(2 ** attempt)
+            time.sleep(2**attempt)
     else:
         return {}
 
@@ -135,9 +139,10 @@ def fetch_catalog_keys(
 
 # ── Step 2: ILSWS REST API ────────────────────────────────────────────────────
 
+
 def _strip_jsonp(text: str) -> str:
     text = text.strip()
-    m    = re.match(r"^[^(]*\((.*)\)\s*;?\s*$", text, re.DOTALL)
+    m = re.match(r"^[^(]*\((.*)\)\s*;?\s*$", text, re.DOTALL)
     return m.group(1) if m else text
 
 
@@ -147,17 +152,17 @@ def fetch_title_info(
     debug_dir=None,
 ) -> dict:
     params = {
-        "clientID":        "DS_CLIENT",
-        "titleID":         catalog_key,
+        "clientID": "DS_CLIENT",
+        "titleID": catalog_key,
         "includeItemInfo": "true",
         "includeOPACInfo": "false",
-        "json":            "true",
-        "callback":        "lcpl_cb",
-        "_":               int(time.time() * 1000),
+        "json": "true",
+        "callback": "lcpl_cb",
+        "_": int(time.time() * 1000),
     }
     headers = {
-        "Referer":          SEARCH_BASE,
-        "Accept":           "*/*",
+        "Referer": SEARCH_BASE,
+        "Accept": "*/*",
         "X-Requested-With": "XMLHttpRequest",
     }
 
@@ -174,12 +179,13 @@ def fetch_title_info(
             log.warning(f"  ILSWS attempt {attempt + 1} for key {catalog_key}: {e}")
             if attempt == MAX_RETRIES - 1:
                 return {}
-            time.sleep(2 ** attempt)
+            time.sleep(2**attempt)
 
     return {}
 
 
 # ── Step 3: parse ILSWS response ──────────────────────────────────────────────
+
 
 def item_status(current_loc: str, due_date) -> str:
     loc = (current_loc or "").upper()
@@ -191,6 +197,7 @@ def item_status(current_loc: str, due_date) -> str:
         return "In Transit"
     return "Available"
 
+
 def parse_title_info(
     data: dict,
     manga_id: int,
@@ -198,7 +205,7 @@ def parse_title_info(
     manga_type: str,
     html_volume: int | None = None,
 ) -> tuple:
-    books             = []
+    books = []
     valid_branch_keys = {k.upper() for k in BRANCH_MAPPING}
 
     for title_entry in data.get("TitleInfo", []):
@@ -218,22 +225,23 @@ def parse_title_info(
                 for item in call.get("ItemInfo", [])
             ] or ["Graphic Novel - Young Adult Fiction"]
 
-            final_status = next(
-                (s for s in statuses if "Checked Out" not in s), "Checked Out"
-            )
+            final_status = next((s for s in statuses if "Checked Out" not in s), "Checked Out")
 
-            books.append({
-                "manga_id":        manga_id,
-                "volume":          volume,
-                "branch_status":   [(library_id, final_status)],
-                "availability_id": availability_id,
-            })
+            books.append(
+                {
+                    "manga_id": manga_id,
+                    "volume": volume,
+                    "branch_status": [(library_id, final_status)],
+                    "availability_id": availability_id,
+                }
+            )
             availability_id += 1
 
     return books, availability_id
 
 
 # ── Orchestration ─────────────────────────────────────────────────────────────
+
 
 def scrape(
     start: int = 1,
@@ -245,14 +253,14 @@ def scrape(
     all_pairs = load_title_author_map()
 
     if manga_ids:
-        target_ids      = set(manga_ids)
+        target_ids = set(manga_ids)
         pairs_to_scrape = [p for p in all_pairs if p.manga_id in target_ids]
     else:
-        pairs_to_scrape = all_pairs[max(0, start - 1):end]
+        pairs_to_scrape = all_pairs[max(0, start - 1) : end]
 
     log.info(f"Scraping {len(pairs_to_scrape)} titles via ILSWS REST API")
 
-    session         = make_session()
+    session = make_session()
     all_books: list = []
     availability_id = 1
 
@@ -295,7 +303,7 @@ def scrape(
             all_books.extend(books)
 
             if books:
-                vols     = [b["volume"] for b in books]
+                vols = [b["volume"] for b in books]
                 branches = [b["branch_status"][0][0] for b in books]
                 log.info(f"  Key {key}: vol(s) {vols} @ {branches}")
 
@@ -304,6 +312,7 @@ def scrape(
 
 
 # ── Database write with batch commits ─────────────────────────────────────────
+
 
 def _reconnect(conn, cursor):
     """
@@ -325,7 +334,7 @@ def _reconnect(conn, cursor):
             conn.close()
         except Exception:
             pass
-        conn   = get_connection()
+        conn = get_connection()
         cursor = conn.cursor()
         return conn, cursor
 
@@ -334,7 +343,7 @@ def write_to_db(books: list) -> str:
     if not books:
         return "no books to write"
 
-    conn   = get_connection()
+    conn = get_connection()
     cursor = conn.cursor()
 
     branch_id_map = {k.upper(): v for k, v in BRANCH_MAPPING.items()}
@@ -348,29 +357,35 @@ def write_to_db(books: list) -> str:
     lcpl_library_id = row[0]
 
     # ── Delete old data for all affected titles up-front ─────────────────────
-    manga_ids    = list({b["manga_id"] for b in books})
+    manga_ids = list({b["manga_id"] for b in books})
     placeholders = ",".join(["%s"] * len(manga_ids))
 
-    cursor.execute(f"""
+    cursor.execute(
+        f"""
         DELETE bas FROM branch_availability_status bas
         JOIN availability a ON bas.AvailabilityID = a.AvailabilityID
         JOIN branch b ON bas.BranchID = b.BranchID
         WHERE a.MangaID IN ({placeholders}) AND b.LibraryID = %s
-    """, (*manga_ids, lcpl_library_id))
+    """,
+        (*manga_ids, lcpl_library_id),
+    )
 
-    cursor.execute(f"""
+    cursor.execute(
+        f"""
         DELETE a FROM availability a
         LEFT JOIN branch_availability_status bas ON a.AvailabilityID = bas.AvailabilityID
         WHERE a.MangaID IN ({placeholders}) AND bas.AvailabilityID IS NULL
-    """, tuple(manga_ids))
+    """,
+        tuple(manga_ids),
+    )
 
     conn.commit()
 
-    scraped_at = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+    scraped_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
-    inserted         = skipped = 0
-    batch_rows       = 0
-    manga_batch      = 0
+    inserted = skipped = 0
+    batch_rows = 0
+    manga_batch = 0
     current_manga_id: int | None = None
 
     for b in books:
@@ -393,7 +408,7 @@ def write_to_db(books: list) -> str:
                     "(AvailabilityID, BranchID, Status) VALUES (%s, %s, %s)",
                     (avail_id, branch_id, status),
                 )
-                inserted   += 1
+                inserted += 1
                 batch_rows += 1
             else:
                 skipped += 1
@@ -428,10 +443,13 @@ if __name__ == "__main__":
     parser.add_argument("--debug", action="store_true", help="Write raw ILSWS JSON to debug/")
 
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--range",     type=str,
-                       help="Scrape a range of titles (e.g. 1-50)")
-    group.add_argument("--manga-ids", type=lambda s: [int(x) for x in s.split(",")],
-                       metavar="ID,ID", help="Comma-separated MangaIDs")
+    group.add_argument("--range", type=str, help="Scrape a range of titles (e.g. 1-50)")
+    group.add_argument(
+        "--manga-ids",
+        type=lambda s: [int(x) for x in s.split(",")],
+        metavar="ID,ID",
+        help="Comma-separated MangaIDs",
+    )
     args = parser.parse_args()
 
     if args.manga_ids:
@@ -439,7 +457,7 @@ if __name__ == "__main__":
     else:
         try:
             lo, hi = args.range.split("-")
-            books  = scrape(start=max(1, int(lo)), end=int(hi), debug=args.debug)
+            books = scrape(start=max(1, int(lo)), end=int(hi), debug=args.debug)
         except (ValueError, IndexError):
             print("Invalid --range format. Use START-END (e.g. --range 1-50)")
             raise SystemExit(1)
