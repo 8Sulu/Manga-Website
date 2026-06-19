@@ -73,8 +73,9 @@ class TestFmtScrapedAt:
         assert result == '3d ago'
 
     def test_naive_datetime_treated_as_utc(self):
-        # Naive datetimes (no tzinfo) are pinned to UTC by the function
-        naive = datetime.now(timezone.utc) - timedelta(days=2)
+        # Naive datetimes (no tzinfo) are pinned to UTC by the function.
+        # Build one without datetime.utcnow() (deprecated since 3.12).
+        naive = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=2)
         assert fmt_scraped_at(naive) == '2d ago'
 
     def test_zero_days_is_today(self):

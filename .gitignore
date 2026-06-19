@@ -8,3 +8,9 @@ curl_broward/
 debug/
 line_count.sh
 code.txt
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+coverage.xml
+.coverage
