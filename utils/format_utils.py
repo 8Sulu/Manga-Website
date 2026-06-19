@@ -32,13 +32,13 @@ def fmt_scraped_at(dt) -> str | None:
             dt = dt.replace(tzinfo=timezone.utc)
         days = (now - dt).days
         if days == 0:
-            return 'today'
+            return "today"
         if days == 1:
-            return 'yesterday'
+            return "yesterday"
         if days < 7:
-            return f'{days}d ago'
+            return f"{days}d ago"
         if days < 31:
-            return f'{days // 7}w ago'
-        return f'{days // 30}mo ago'
+            return f"{days // 7}w ago"
+        return f"{days // 30}mo ago"
     except Exception:
         return None

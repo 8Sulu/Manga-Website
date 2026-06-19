@@ -10,16 +10,17 @@ import requests
 _BASE_DIR = Path(__file__).parent.parent.resolve()
 try:
     from dotenv import load_dotenv
-    load_dotenv(_BASE_DIR / '.env', override=False)
+
+    load_dotenv(_BASE_DIR / ".env", override=False)
 except ImportError:
-    _env_file = _BASE_DIR / '.env'
+    _env_file = _BASE_DIR / ".env"
     if _env_file.exists():
         for _line in _env_file.read_text().splitlines():
             _line = _line.strip()
-            if _line and not _line.startswith('#') and '=' in _line:
-                _k, _v = _line.split('=', 1)
+            if _line and not _line.startswith("#") and "=" in _line:
+                _k, _v = _line.split("=", 1)
                 if _k.strip() not in os.environ:
-                    os.environ[_k.strip()] = _v.strip().strip('"\'')
+                    os.environ[_k.strip()] = _v.strip().strip("\"'")
 
 from config.settings import DATA_DIR, REQUEST_TIMEOUT, MAX_RETRIES  # noqa: E402
 from services.mal_client import authenticated_request  # noqa: E402
@@ -42,6 +43,7 @@ def clear_stop():
 
 def is_stop_requested():
     return _stop_requested
+
 
 # ── manga.csv field names ─────────────────────────────────────────────────────
 MANGA_CSV_FIELDS = [

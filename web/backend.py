@@ -7,8 +7,7 @@ import time
 from datetime import datetime, timezone
 
 from cachelib.file import FileSystemCache
-from flask import (Flask, render_template, request, jsonify,
-                   redirect, url_for, session)
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session
 from flask_session import Session
 
 from config.settings import DATA_DIR, SCRIPTS_DIR
@@ -682,22 +681,22 @@ def search():
     no_vol1 = request.args.get("no_vol1", "").strip()
     sort_key = request.args.get("sort", "score").strip()
 
-    conditions = ['b.BranchName IS NOT NULL', 'b.BranchID IS NOT NULL']
+    conditions = ["b.BranchName IS NOT NULL", "b.BranchID IS NOT NULL"]
     params: list = []
     if title:
-        conditions.append('m.Title LIKE %s')
-        params.append(f'%{title}%')
+        conditions.append("m.Title LIKE %s")
+        params.append(f"%{title}%")
     if type_:
-        conditions.append('m.Type = %s')
+        conditions.append("m.Type = %s")
         params.append(type_)
     if volume:
-        conditions.append('a.Volume = %s')
+        conditions.append("a.Volume = %s")
         params.append(volume)
     if branch:
-        conditions.append('b.BranchName = %s')
+        conditions.append("b.BranchName = %s")
         params.append(branch)
     if lib_filter:
-        conditions.append('b.LibraryID = %s')
+        conditions.append("b.LibraryID = %s")
         params.append(int(lib_filter))
 
     sql = f"""

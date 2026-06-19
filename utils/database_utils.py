@@ -1,12 +1,49 @@
-import mysql.connector
-from mysql.connector.abstracts import MySQLConnectionAbstract
-from mysql.connector.pooling import PooledMySQLConnection
+"""
+utils/database_utils.py
+
+Database access helpers used throughout the application.
+
+Context managers (get_db_connection, get_db_cursor) are the preferred interface
+for Flask route handlers.  Scrapers that need direct cursor/transaction control
+(e.g. bulk-insert loops with manual commit) should use get_connection().
+
+Exports:
+    get_connection()              — raw connection (scrapers)
+    get_db_connection()           — context manager, auto-rollback/close
+    get_db_cursor()                — context manager, dict cursor, auto-commit
+    execute_query(sql, params)    — SELECT → list or single row
+    execute_update(sql, params)   — INSERT/UPDATE/DELETE → rowcount
+    get_library_ids()             — (lcpl_id, broward_id) with process-lifetime cache
+    invalidate_library_id_cache() — call after a DB reset
+"""
+
+from __future__ import annotations
+
 from contextlib import contextmanager
+from typing import TYPE_CHECKING
+
+import mysql.connector
 
 from config.settings import DB_CONFIG
 
+if TYPE_CHECKING:
+    # Submodule-level imports — needed only for the type checker.  Importing
+    # these at runtime breaks tests/conftest.py's mysql.connector stub: the
+    # stub registers a bare MagicMock at sys.modules['mysql.connector'] (so
+    # the test suite can run without mysql-connector-python's C extension
+    # installed), and a MagicMock has no __path__, so Python's import
+    # machinery can't resolve "mysql.connector.abstracts" as a submodule of
+    # it ("'mysql.connector' is not a package"). Gating the import behind
+    # TYPE_CHECKING means mypy still sees the real types while pytest never
+    # actually executes this import. Safe because `from __future__ import
+    # annotations` (above) means the return-type hint below is never
+    # evaluated at runtime — it's stored as a string.
+    from mysql.connector.abstracts import MySQLConnectionAbstract
+    from mysql.connector.pooling import PooledMySQLConnection
+
 
 # ── Raw connection (scrapers) ──────────────────────────────────────────────────
+
 
 def get_connection() -> PooledMySQLConnection | MySQLConnectionAbstract:
     """
