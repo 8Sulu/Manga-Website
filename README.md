@@ -27,7 +27,9 @@ It answers that across 500+ manga titles simultaneously, with real-time per-bran
   1. Fetch manga rankings from the **MyAnimeList API** (batches of 500, with OAuth2 token refresh)
   2. Scrape **LCPL** availability via the SirsiDynix ILSWS REST API
   3. Scrape **Broward County** availability via catalog HTML + AJAX parsing
-- Live job progress tracking with stop controls
+- Live job progress tracking with stop controls — jobs run on a Redis-backed
+  queue (RQ), so progress is visible no matter which Gunicorn worker handles
+  the polling request
 - Range and "new only" targeting for incremental scrapes
 - Manual overrides: update volume counts, delete entries, clear stale data
 - Collection stats broken down by branch and library
@@ -42,14 +44,14 @@ It answers that across 500+ manga titles simultaneously, with real-time per-bran
 |---|---|
 | Backend | Python · Flask |
 | Database | MySQL |
-| Scheduling | APScheduler (SQLAlchemy job store) |
+| Job Queue | RQ + Redis (background scrape/MAL-fetch jobs, status shared across every Gunicorn worker) |
 | Scraping | Requests · BeautifulSoup |
 | External APIs | MyAnimeList API v2 (OAuth2) · SirsiDynix ILSWS |
 | Frontend | Vanilla HTML/CSS/JS (no framework) |
 | Fonts | Space Mono · Syne · Noto Sans JP |
-| Testing | pytest · 217 tests · mocked MySQL, no live DB required |
-| CI/CD | GitHub Actions — lint (ruff), type-check (mypy), test matrix across Python 3.11–3.13 |
-| Containerization | Docker · docker-compose (Flask + MySQL + nginx) |
+| Testing | pytest · mocked MySQL (no live DB required) · a real local Redis for job-queue tests |
+| CI/CD | GitHub Actions — lint (ruff), type-check (mypy), test matrix across Python 3.11–3.13, with a Redis service container for the job-queue tests |
+| Containerization | Docker · docker-compose (Flask + MySQL + Redis + nginx) |
 
 ---
 
@@ -62,21 +64,35 @@ cp .env.example .env       # fill in DB password, admin password, etc.
 docker compose up --build
 ```
 
-Open `http://localhost`. On first run, log into `/admin` and click **Reset Database** to create the schema and seed library/branch data from `data/*.csv`.
+This starts five containers — `nginx`, `app` (gunicorn), `worker` (the RQ
+worker that actually runs scrapes), `db` (MySQL), and `redis` — see
+`docker-compose.yml` for service details. Open `http://localhost`. On first
+run, log into `/admin` and click **Reset Database** to create the schema
+and seed library/branch data from `data/*.csv`.
 
-The stack is three containers — `nginx` in front, `app` (gunicorn), and `db` (MySQL) — mirroring the bare-metal layout below. See `docker-compose.yml` for service details.
-
-**After changing code:** rebuild just the app container — `docker compose up -d --build app`. Code is copied into the image at build time, not bind-mounted, so `restart` alone won't pick up changes. Static assets in `web/static/` *are* bind-mounted and update live with no rebuild.
+**After changing code:** rebuild the app *and* worker containers —
+`docker compose up -d --build app worker` (both run the same image; the
+worker needs rebuilding too or it'll keep executing stale scraper code).
+Static assets in `web/static/` *are* bind-mounted and update live with no
+rebuild.
 
 ### Without Docker
 
 ```bash
 pip install -e .
 # point a .env at a local MySQL instance: DB_HOST / DB_USER / DB_PASSWORD / DB_NAME
-python web/backend.py        # dev server on :5000
+redis-server &                                       # job queue backing store
+python web/backend.py                                # dev server on :5000
+rq worker manga-jobs --url redis://localhost:6379/0  # in a second terminal —
+                                                       # this is what actually
+                                                       # runs scrape/MAL jobs
 ```
 
-For production without Docker, `manga.service` (systemd unit) and `manga.nginx` (reverse proxy config) in the repo root show the original gunicorn + nginx deployment this app was built around.
+For production without Docker, `manga.service` and `manga-worker.service`
+(systemd units) and `manga.nginx` (reverse proxy config) in the repo root
+show the original gunicorn + RQ worker + nginx deployment this app was
+built around. Both services must be installed and running — `manga.service`
+only *enqueues* jobs; `manga-worker.service` is what dequeues and runs them.
 
 ---
 
@@ -84,13 +100,21 @@ For production without Docker, `manga.service` (systemd unit) and `manga.nginx` 
 
 ```bash
 pip install -e ".[dev]"
-pytest                                                    # run everything
-pytest tests/test_search_utils.py                         # one module
-pytest -k normalize_status                                 # by name
-pytest --cov=utils --cov=web --cov-report=term-missing    # with coverage
+redis-server &                                             # required for test_job_runner.py
+pytest                                                      # run everything
+pytest tests/test_search_utils.py                           # one module
+pytest -k normalize_status                                  # by name
+pytest --cov=utils --cov=web --cov-report=term-missing      # with coverage
 ```
 
-217 tests across unit (pure-function) and integration (Flask route) layers. No live MySQL or network access required — the DB layer is mocked in `tests/conftest.py`, so the suite runs in under 2 seconds and is safe to run in CI.
+Unit (pure-function) and integration (Flask route) tests, run in CI on
+every push across Python 3.11–3.13. The DB layer is mocked in
+`tests/conftest.py` — no live MySQL or network access required for the
+rest of the suite. The one exception is `tests/test_job_runner.py`, which
+exercises the real Redis/RQ-backed job queue against an actual local
+Redis instance (no fake/mock Redis) — the CI workflow spins one up
+automatically as a service container; for local runs, just `redis-server &`
+first.
 
 `.github/workflows/ci.yml` runs ruff, mypy, and the full test suite with coverage on every push, across Python 3.11–3.13.
 
@@ -99,28 +123,24 @@ pytest --cov=utils --cov=web --cov-report=term-missing    # with coverage
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                        Flask App                        │
-│  /search  /admin  /api/stats  /api/suggestions  …       │
-└──────────────┬──────────────────────┬───────────────────┘
-               │                      │
-    ┌──────────▼───────┐     ┌─────────▼────────────┐
-    │   MySQL Database │     │  APScheduler Jobs    │
-    │  manga           │     │  get_manga.py        │
-    │  library         │     │  scrapper.py         │
-    │  branch          │     │  broward_scrapper.py │
-    │  availability    │     └──────────────────────┘
-    │  branch_avail... │
-    └──────────────────┘
-           ▲
-    ┌──────┴──────────────────────────┐
-    │         Data Sources            │
-    │  MyAnimeList API  ─ rankings,   │
-    │                     scores,     │
-    │                     cover art   │
-    │  LCPL ILSWS REST  ─ per-branch  │
-    │  Broward Catalog  ─ title-level │
-    └──────────────────────────────────┘
+┌───────────────────────────────────────────────────────────┐
+│              Flask App (N Gunicorn workers)                │
+│  /search  /admin  /api/stats  /api/job/*  /api/suggestions │
+└──────────────┬───────────────────────┬─────────────────────┘
+               │                       │ enqueue job / poll status
+    ┌──────────▼────────┐    ┌─────────▼─────────────────┐
+    │   MySQL Database  │    │  Redis                    │
+    │  manga            │    │  job:state:{name}  (HASH)  │
+    │  library          │    │  job:history       (LIST)  │
+    │  branch           │    │  manga-jobs        (queue) │
+    │  availability     │    └─────────┬─────────────────┘
+    │  branch_avail...  │              │ dequeue
+    └─────────▲─────────┘    ┌─────────▼─────────────────┐
+              │              │  rq worker process(es)     │
+              └──────────────┤  get_manga.py              │
+                              │  leon_scraper.py           │
+                              │  broward_scraper.py        │
+                              └────────────────────────────┘
 ```
 
 ---
@@ -141,7 +161,7 @@ Each `availability` row represents one volume of one title. Each `branch_availab
 
 **Broward** reverse-engineers a two-step AJAX flow used by the SirsiDynix Enterprise catalog UI — an init POST to prime the session, then an availability POST that returns a JSON payload with available/total/hold counts.
 
-Both scrapers pull their title/author list from the database, support range and index targeting for incremental runs, and write results back to MySQL with safe delete-then-insert logic scoped to the correct library.
+Both scrapers pull their title/author list from the database, support range and index targeting for incremental runs, and write results back to MySQL with safe delete-then-insert logic scoped to the correct library. They run inside an `rq worker` process (not inside a web request), dispatched by `utils/job_runner.py`.
 
 ---
 
@@ -151,3 +171,5 @@ Both scrapers pull their title/author list from the database, support range and 
 - **37 BCL branches** with per-volume, per-branch status
 - **500-title batches** from MAL with automatic OAuth2 token refresh
 - Incremental scraping — "new only" mode skips already-scraped titles
+- Job state lives in Redis, not process memory — Gunicorn can run multiple
+  workers (or multiple container replicas) without job status going stale

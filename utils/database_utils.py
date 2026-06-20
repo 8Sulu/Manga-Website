@@ -27,17 +27,7 @@ import mysql.connector
 from config.settings import DB_CONFIG
 
 if TYPE_CHECKING:
-    # Submodule-level imports — needed only for the type checker.  Importing
-    # these at runtime breaks tests/conftest.py's mysql.connector stub: the
-    # stub registers a bare MagicMock at sys.modules['mysql.connector'] (so
-    # the test suite can run without mysql-connector-python's C extension
-    # installed), and a MagicMock has no __path__, so Python's import
-    # machinery can't resolve "mysql.connector.abstracts" as a submodule of
-    # it ("'mysql.connector' is not a package"). Gating the import behind
-    # TYPE_CHECKING means mypy still sees the real types while pytest never
-    # actually executes this import. Safe because `from __future__ import
-    # annotations` (above) means the return-type hint below is never
-    # evaluated at runtime — it's stored as a string.
+    # Submodule-level imports — needed only for the type checker.
     from mysql.connector.abstracts import MySQLConnectionAbstract
     from mysql.connector.pooling import PooledMySQLConnection
 
@@ -60,17 +50,29 @@ def get_connection() -> PooledMySQLConnection | MySQLConnectionAbstract:
 
 @contextmanager
 def get_db_connection():
-    """Yield a connection; auto-rollback on exception, always close."""
+    """Yield a connection; auto-rollback on exception, always close cleanly."""
     conn = None
     try:
         conn = mysql.connector.connect(**DB_CONFIG)
         yield conn
-    except mysql.connector.Error as err:
-        if conn:
-            conn.rollback()
+        # If no exception occurred, commit any outstanding operations
+        if conn and conn.is_connected() and not conn.autocommit:
+            conn.commit()
+    except Exception as err:
+        if conn and conn.is_connected():
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         raise err
     finally:
         if conn and conn.is_connected():
+            try:
+                # Defensive rollback to ensure no open transaction views leak into the pool
+                if not conn.autocommit:
+                    conn.rollback()
+            except Exception:
+                pass
             conn.close()
 
 
@@ -81,9 +83,11 @@ def get_db_cursor():
         cursor = conn.cursor(dictionary=True)
         try:
             yield cursor
-            conn.commit()
+            if not conn.autocommit:
+                conn.commit()
         except Exception:
-            conn.rollback()
+            if not conn.autocommit:
+                conn.rollback()
             raise
         finally:
             cursor.close()
@@ -105,19 +109,18 @@ def execute_update(query: str, params=None) -> int:
         cursor = conn.cursor()
         try:
             cursor.execute(query, params or ())
-            conn.commit()
+            if not conn.autocommit:
+                conn.commit()
             return cursor.rowcount
-        except mysql.connector.Error as err:
-            conn.rollback()
+        except Exception as err:
+            if not conn.autocommit:
+                conn.rollback()
             raise err
         finally:
             cursor.close()
 
 
 # ── Library ID cache ───────────────────────────────────────────────────────────
-# Library IDs are stable for the lifetime of the process (they only change
-# after a DB reset).  We cache the (lcpl_id, broward_id) pair on first lookup
-# and expose invalidate_library_id_cache() for the reset route to call.
 
 _library_id_cache: tuple[int, int] | None = None
 

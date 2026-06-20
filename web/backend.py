@@ -240,10 +240,18 @@ def _start_scrape_job(action: str, json_body: dict):
         # A range is always required for bulk scrapes — never scrape everything blindly
         return jsonify({"ok": False, "message": "A range is required (e.g. 1-50)"}), 400
 
-    def _on_scrape_done(job_name: str, ok: bool) -> None:
-        _invalidate_missing_cache()
-
-    ok, status, msg = start_job(action, cmd, on_complete=_on_scrape_done)
+    # NOTE: the old in-process job runner accepted an on_complete callback
+    # here to force-invalidate _missing_cache the instant a scrape finished.
+    # That doesn't translate to the Redis/RQ queue: execute_job() now runs
+    # inside a completely separate `rq worker` process (see
+    # utils/job_runner.py's module docstring), so a closure captured in this
+    # request handler has no way to run "after" a job executing somewhere
+    # else. _missing_manga_ids()'s existing _MISSING_TTL (60s) means the
+    # admin dashboard's missing-titles counts simply catch up within a
+    # minute of a scrape finishing instead of instantly — an acceptable
+    # trade-off for a dashboard stat, and one less fragile cross-process
+    # callback to maintain.
+    ok, status, msg = start_job(action, cmd)
     print(f"\n{cmd}\n")
     return jsonify({"ok": ok, "message": msg}), status
 

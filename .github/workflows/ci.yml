@@ -7,6 +7,10 @@
 #   test    — pytest with coverage, uploads to a job summary
 #
 # MySQL is NOT needed — all DB calls are patched in conftest.py.
+# Redis IS needed — tests/test_job_runner.py exercises the real
+# Redis/RQ-backed job queue (utils/job_runner.py) against an actual Redis
+# instance (no fake/mock Redis), so the `test` job below runs one as a
+# service container.
 
 name: CI
 
@@ -59,6 +63,17 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
 
     steps:
       - uses: actions/checkout@v4

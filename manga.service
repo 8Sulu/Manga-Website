@@ -4,11 +4,21 @@
 #   sudo cp manga.service /etc/systemd/system/
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now manga
+#
+# Also install manga-worker.service — it runs the RQ worker that actually
+# executes scrape_leon / scrape_broward / get_manga jobs. This service
+# (the web app) just enqueues them; without the worker running, jobs will
+# sit in Redis forever and /admin will show them as stuck at "queued…".
 
 [Unit]
 Description=Leon County Manga Library (gunicorn)
-After=network.target mysql.service
+After=network.target mysql.service redis-server.service
 Requires=mysql.service
+# Redis is a soft dependency for the web app: public search routes don't
+# touch it at all, only /admin's job-related routes do. Start it if present
+# but don't fail the whole site if it's briefly down — contrast with
+# manga-worker.service below, which hard-requires Redis.
+Wants=redis-server.service
 
 [Service]
 # Run as a dedicated low-privilege user (create with: sudo useradd -r -s /sbin/nologin manga)
@@ -27,7 +37,7 @@ RuntimeDirectoryMode=0755
 Restart=on-failure
 RestartSec=5
 
-# Give the scraper (Selenium/Chrome) enough time to shut down gracefully
+# Give any in-flight requests a moment to finish on shutdown
 TimeoutStopSec=60
 
 # Forward stdout/stderr to journald

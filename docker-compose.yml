@@ -1,7 +1,13 @@
 # docker-compose.yml
 #
-# Three services, mirroring your bare-metal layout (gunicorn behind nginx,
-# MySQL as the datastore) but networked instead of unix-socket + systemd.
+# Five services, mirroring the bare-metal layout (gunicorn behind nginx,
+# MySQL as the datastore) plus the Redis/RQ job queue:
+#   nginx   — reverse proxy
+#   app     — gunicorn (Flask), enqueues scrape/MAL-fetch jobs but never
+#             runs them itself
+#   worker  — `rq worker manga-jobs` — actually executes those jobs
+#   db      — MySQL
+#   redis   — job state + history + the RQ queue itself
 #
 # Quick start:
 #   cp .env.example .env   # fill in real values
@@ -11,6 +17,11 @@
 # First run: visit /admin, log in, click "Reset Database" once to create
 # the schema and seed library/branch data from data/*.csv (see README note
 # below about ADMIN_PASSWORD and the data/ volume).
+#
+# After changing code: rebuild both code-running containers —
+#   docker compose up -d --build app worker
+# (worker runs the same image as app, just with a different command, so it
+# needs rebuilding too or it'll keep running stale scraper code.)
 
 services:
   db:
@@ -29,9 +40,31 @@ services:
       timeout: 5s
       retries: 10
       start_period: 20s
-    # No host port published by default — only the app container needs to
-    # reach MySQL. Add `ports: ["3306:3306"]` (or a docker-compose.override.yml)
-    # if you want to connect a local SQL client for debugging.
+    # No host port published by default — only the app/worker containers
+    # need to reach MySQL. Add `ports: ["3306:3306"]` (or a
+    # docker-compose.override.yml) if you want to connect a local SQL
+    # client for debugging.
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # The stock redis-server config already does periodic RDB snapshots
+    # with no extra setup — the volume below just gives those snapshots
+    # somewhere durable to land, so job history / any in-flight job state
+    # survives a container restart. Job data is inherently low-stakes
+    # (a lost "currently running" flag just means re-clicking a scrape
+    # button), so no custom redis.conf or AOF persistence is needed.
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    # No host port published — only app/worker need to reach Redis. Add
+    # `ports: ["6379:6379"]` if you want to inspect it locally with
+    # redis-cli.
 
   app:
     build: .
@@ -40,8 +73,11 @@ services:
     environment:
       DB_HOST: db
       DB_PORT: "3306"
+      REDIS_URL: redis://redis:6379/0
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     volumes:
       # Bind-mounts your existing data/ dir (manga.csv, libraries.csv,
@@ -57,6 +93,27 @@ services:
       retries: 5
       start_period: 15s
 
+  worker:
+    # Runs the RQ worker that actually executes scrape_leon / scrape_broward
+    # / get_manga jobs (see utils/job_runner.py). Same image as `app` — only
+    # the command differs — so a code change needs both rebuilt, but
+    # there's no second Dockerfile to maintain.
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DB_HOST: db
+      DB_PORT: "3306"
+      REDIS_URL: redis://redis:6379/0
+    command: ["rq", "worker", "manga-jobs", "--url", "redis://redis:6379/0"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./data:/app/data
+
   nginx:
     image: nginx:1.27-alpine
     restart: unless-stopped
@@ -71,3 +128,4 @@ services:
 
 volumes:
   db_data:
+  redis_data:

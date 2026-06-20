@@ -1,102 +1,75 @@
 """
 tests/test_job_runner.py
 
-Unit tests for utils/job_runner.py.
+Unit tests for utils/job_runner.py (Redis/RQ-backed job queue).
 
-The job runner launches real subprocesses, so we test it two ways:
-  1. Unit-level: patch subprocess.Popen and verify state transitions,
-     history writes, on_complete callbacks, and stop-flag mechanics.
-  2. Lightweight integration: run a real trivial subprocess (python -c ...)
-     and verify the job reaches 'done' state.
+No real `rq worker` process is started for these tests. Instead, the
+autouse fixture below points job_runner at a dedicated Redis DB and swaps in
+an `is_async=False` Queue, so `start_job()` runs `execute_job()` inline in
+the calling thread/process — the exact same function a real `rq worker`
+would invoke, just without a second process. This is the standard RQ
+testing pattern and keeps these tests fast and hermetic while still
+exercising the real code path.
 
-No DB, no Flask, no network.
-
-IMPORTANT — thread/fixture interaction:
-`start_job` spawns a daemon thread and returns immediately; it does not wait
-for that thread to finish. `_run_subprocess` indexes `_jobs[job_name]`
-directly (not `.get()`) inside its `for line in proc.stdout:` loop. If a
-test returns without waiting for its job to actually finish, the
-`_reset_job_state` autouse fixture below can clear `_jobs` while that
-thread is still mid-loop, producing a `KeyError` inside the daemon thread —
-surfaced by pytest as a `PytestUnhandledThreadExceptionWarning`, not a
-clean test failure, which makes it easy to miss.
-
-Every test that calls `start_job` therefore waits for the job to reach
-`running: False` (via `_wait_until_done`) before the test function returns.
-This guarantees the thread has exited the stdout loop — the only place
-`_jobs[job_name]` is indexed in a way that's unsafe against a concurrent
-`.clear()` — before the next test's fixture can run.
-
-This matters even for tests that mock `subprocess.Popen`: the `with
-patch(...)` block can exit before the background thread gets around to
-calling `Popen`, so the thread may end up calling the *real* Popen instead
-of the mock. Waiting for completion *inside* the patch context (not after
-it) keeps the mock active for the thread's actual lifetime.
+Requires a real Redis reachable at REDIS_URL (defaults to
+redis://localhost:6379, here pinned to db 15 so it never collides with dev
+data). No mocking of subprocess.Popen — tests spawn tiny real `python -c`
+processes, same as the old suite's "lightweight integration" tests.
 """
 
 from __future__ import annotations
 
 import sys
+import threading
 import time
 import uuid
-from unittest.mock import patch, MagicMock
 
 import pytest
-
+import redis as redis_module
+from rq import Queue
 
 from utils import job_runner
 from utils.job_runner import (
+    JOB_NAMES,
+    append_job_history,
+    execute_job,
+    get_job,
+    read_job_history,
     start_job,
     stop_job,
-    get_job,
-    JOB_NAMES,
-    read_job_history,
-    append_job_history,
-    _jobs,
-    _jobs_lock,
-    _history,
-    _history_lock,
 )
+
+TEST_REDIS_URL = "redis://localhost:6379/15"
 
 
 @pytest.fixture(autouse=True)
-def _reset_job_state():
-    """Clear in-process job and history state before and after each test."""
-    with _jobs_lock:
-        _jobs.clear()
-    with _history_lock:
-        _history.clear()
-    job_runner._history_loaded = False
-    job_runner._history_path = None
+def _redis_test_env():
+    """
+    Point job_runner at a clean, dedicated Redis DB for each test and use a
+    synchronous Queue so start_job() executes inline. Flushes before and
+    after so tests never see leftover state from a previous run.
+    """
+    conn = redis_module.Redis.from_url(TEST_REDIS_URL, decode_responses=True)
+    conn.flushdb()
+
+    job_runner._redis_conn = conn
+    job_runner._queue = Queue(job_runner.QUEUE_NAME, connection=conn, is_async=False)
+
     yield
-    with _jobs_lock:
-        _jobs.clear()
-    with _history_lock:
-        _history.clear()
+
+    conn.flushdb()
+    job_runner._redis_conn = None
+    job_runner._queue = None
 
 
 @pytest.fixture()
 def job_name():
-    """
-    Unique job name per test.
-
-    start_job/stop_job/get_job don't validate against JOB_NAMES (that
-    check only happens at the Flask route layer), so any string works.
-    Uniqueness is defense-in-depth on top of _wait_until_done — it means
-    two tests can never collide on the same _jobs key even if a wait were
-    ever accidentally skipped.
-    """
+    """Unique job name per test so tests can never collide on Redis keys."""
     return f"test_job_{uuid.uuid4().hex[:8]}"
 
 
 def _wait_until_done(name: str, timeout: float = 5.0) -> dict | None:
-    """
-    Poll get_job(name) until running is False (or timeout).
-
-    Returns the final job dict, or None if the job never appeared at all.
-    Every test that calls start_job MUST call this before returning — see
-    the module docstring for why.
-    """
+    """Poll get_job(name) until running is False (or timeout)."""
     deadline = time.monotonic() + timeout
     job = None
     while time.monotonic() < deadline:
@@ -107,7 +80,7 @@ def _wait_until_done(name: str, timeout: float = 5.0) -> dict | None:
     return job
 
 
-# ── JOB_NAMES ─────────────────────────────────────────────────────────────────
+# ── JOB_NAMES ───────────────────────────────────────────────────────────────────
 
 
 class TestJobNames:
@@ -124,37 +97,23 @@ class TestJobNames:
 
 
 class TestStartJob:
-    def _fake_popen(self, lines: list[str], returncode: int = 0):
-        """Build a mock Popen that yields `lines` from stdout."""
-        mock_proc = MagicMock()
-        mock_proc.stdout = iter(line + "\n" for line in lines)
-        mock_proc.returncode = returncode
-        mock_proc.poll.return_value = None
-        mock_proc.wait.return_value = returncode
-        return mock_proc
-
     def test_start_job_returns_200_ok(self, job_name):
-        with patch("subprocess.Popen", return_value=self._fake_popen(["done"])):
-            ok, status, msg = start_job(job_name, ["echo", "hi"])
-            assert ok is True
-            assert status == 200
-            # Wait for completion *inside* the patch context — the
-            # background thread may not call Popen until after this
-            # point, and the mock must still be active when it does.
-            _wait_until_done(job_name)
+        ok, status, msg = start_job(job_name, [sys.executable, "-c", 'print("done")'])
+        assert ok is True
+        assert status == 200
+        # The test Queue is synchronous, so by the time start_job() returns
+        # the job has already run to completion.
+        job = get_job(job_name)
+        assert job is not None
+        assert job["running"] is False
 
     def test_start_duplicate_job_returns_409(self, job_name):
-        with _jobs_lock:
-            _jobs[job_name] = {"running": True, "progress": 0, "message": ""}
+        r = job_runner._get_redis()
+        r.hset(job_runner._state_key(job_name), "running", "1")
         ok, status, msg = start_job(job_name, ["echo", "hi"])
         assert ok is False
         assert status == 409
         assert "already running" in msg
-        # No real thread was spawned for the duplicate request (start_job
-        # returns early), and the fake "running" entry has no backing
-        # process — clear it manually so teardown doesn't trip on it.
-        with _jobs_lock:
-            _jobs.pop(job_name, None)
 
     def test_get_job_unknown_name_returns_none(self):
         assert get_job("no_such_job_at_all") is None
@@ -173,16 +132,55 @@ class TestStartJob:
     def test_job_failure_records_error_in_history(self, job_name):
         """A subprocess that exits non-zero should produce an 'error' history entry."""
         start_job(job_name, [sys.executable, "-c", "raise SystemExit(1)"])
-        _wait_until_done(job_name)
         history = read_job_history()
         entries = [e for e in history if e["job"] == job_name]
         assert entries
         assert entries[-1]["status"] == "error"
 
+    def test_rq_job_id_stored_in_state(self, job_name):
+        start_job(job_name, [sys.executable, "-c", 'print("done")'])
+        r = job_runner._get_redis()
+        assert r.hget(job_runner._state_key(job_name), "rq_job_id")
+
+    def test_concurrent_start_calls_only_one_succeeds(self, job_name):
+        """
+        Two Gunicorn workers hitting /admin for the same job_name at nearly
+        the same time should not both win — this is exactly the race the old
+        in-process `_jobs_lock` prevented, now enforced via Redis WATCH/MULTI
+        instead of a Python lock (since multiple *processes*, not just
+        threads, can call start_job concurrently in production).
+        """
+        script = "import time; time.sleep(0.3)"
+        results: list[tuple[bool, int, str]] = []
+        lock = threading.Lock()
+
+        def runner():
+            res = start_job(job_name, [sys.executable, "-c", script])
+            with lock:
+                results.append(res)
+
+        threads = [threading.Thread(target=runner) for _ in range(3)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5)
+
+        oks = [r for r in results if r[0] is True]
+        conflicts = [r for r in results if r[0] is False and r[1] == 409]
+        assert len(oks) == 1
+        assert len(conflicts) == 2
+
+
+# ── execute_job — the function the RQ worker actually runs ───────────────────
+
+
+class TestExecuteJob:
     def test_progress_parsed_from_bracket_notation(self, job_name):
         """
         Lines like '[5/10] Processing …' should advance the progress counter.
-        We verify by inspecting the job dict mid-run via a tight poll.
+        execute_job is run directly in a background thread (mirroring how a
+        real `rq worker` would invoke it) so the test can poll progress
+        while the subprocess is still mid-run.
         """
         script = (
             "import time\n"
@@ -190,18 +188,42 @@ class TestStartJob:
             '    print(f"[{i}/3] item", flush=True)\n'
             "    time.sleep(0.05)\n"
         )
-        start_job(job_name, [sys.executable, "-c", script])
+        t = threading.Thread(target=execute_job, args=(job_name, [sys.executable, "-c", script]))
+        t.start()
+
         deadline = time.monotonic() + 5
         max_progress = 0
         while time.monotonic() < deadline:
             job = get_job(job_name)
             if job:
                 max_progress = max(max_progress, job["progress"])
-            if job and not job["running"]:
-                break
+                if not job["running"] and not t.is_alive():
+                    break
             time.sleep(0.02)
-        # 3/3 = 100%
-        assert max_progress == 100
+
+        t.join(timeout=5)
+        assert max_progress == 100  # 3/3 = 100%
+
+    def test_stop_actually_terminates_running_process(self, job_name):
+        """End-to-end: run a long job, stop it, confirm it stops."""
+        script = (
+            "import time\n"
+            "for i in range(200):\n"
+            '    print(f"[{i}/200] tick", flush=True)\n'
+            "    time.sleep(0.02)\n"
+        )
+        t = threading.Thread(target=execute_job, args=(job_name, [sys.executable, "-c", script]))
+        t.start()
+        time.sleep(0.2)  # let it actually start producing output
+
+        stopped = stop_job(job_name)
+        assert stopped is True
+
+        t.join(timeout=5)
+        job = get_job(job_name)
+        assert job is not None
+        assert job["running"] is False
+        assert job["message"] == "stopped"
 
 
 # ── stop_job ──────────────────────────────────────────────────────────────────
@@ -212,63 +234,14 @@ class TestStopJob:
         assert stop_job(job_name) is False
 
     def test_stop_sets_stop_requested_flag(self, job_name):
-        with _jobs_lock:
-            _jobs[job_name] = {
-                "running": True,
-                "progress": 0,
-                "message": "",
-                "stop_requested": False,
-            }
+        r = job_runner._get_redis()
+        state_key = job_runner._state_key(job_name)
+        r.hset(state_key, mapping={"running": "1", "progress": "0", "message": ""})
+
         result = stop_job(job_name)
+
         assert result is True
-        with _jobs_lock:
-            assert _jobs[job_name]["stop_requested"] is True
-            _jobs.pop(job_name, None)  # no backing thread — clean up manually
-
-    def test_stop_actually_terminates_running_process(self, job_name):
-        """End-to-end: start a long-running job, stop it, confirm it stops."""
-        script = (
-            "import time\n"
-            "for i in range(200):\n"
-            '    print(f"[{i}/200] tick", flush=True)\n'
-            "    time.sleep(0.02)\n"
-        )
-        start_job(job_name, [sys.executable, "-c", script])
-        time.sleep(0.1)  # let it actually start producing output
-        stopped = stop_job(job_name)
-        assert stopped is True
-        job = _wait_until_done(job_name)
-        assert job is not None
-        assert job["running"] is False
-        assert job["message"] == "stopped"
-
-
-# ── on_complete callback ───────────────────────────────────────────────────────
-
-
-class TestOnComplete:
-    def test_on_complete_called_when_job_finishes(self, job_name):
-        callback_results = []
-
-        def on_done(name, ok):
-            callback_results.append((name, ok))
-
-        start_job(job_name, [sys.executable, "-c", 'print("ok")'], on_complete=on_done)
-        _wait_until_done(job_name)
-
-        assert len(callback_results) == 1
-        assert callback_results[0] == (job_name, True)
-
-    def test_on_complete_called_with_false_on_error(self, job_name):
-        callback_results = []
-
-        def on_done(name, ok):
-            callback_results.append((name, ok))
-
-        start_job(job_name, [sys.executable, "-c", "raise SystemExit(1)"], on_complete=on_done)
-        _wait_until_done(job_name)
-
-        assert callback_results[0][1] is False
+        assert r.hget(state_key, "stop_requested") == "1"
 
 
 # ── Job history ────────────────────────────────────────────────────────────────
@@ -290,26 +263,17 @@ class TestJobHistory:
             append_job_history("scrape_leon", "done", f"run {i}")
         assert len(read_job_history()) == 200
 
-    def test_history_persisted_to_file(self, tmp_path):
-        history_file = tmp_path / "job_history.json"
-        job_runner._history_path = history_file
+    def test_history_ordered_oldest_first(self):
+        append_job_history("scrape_leon", "done", "first-entry")
+        append_job_history("scrape_leon", "done", "second-entry")
+        history = [e["message"] for e in read_job_history()]
+        assert history.index("first-entry") < history.index("second-entry")
 
-        append_job_history("get_manga", "done", "added 5 titles")
-
-        import json
-
-        written = json.loads(history_file.read_text())
-        assert any(e["job"] == "get_manga" for e in written)
-
-    def test_history_loaded_from_file_on_first_read(self, tmp_path):
-        import json
-
-        history_file = tmp_path / "job_history.json"
-        history_file.write_text(
-            json.dumps([{"job": "reset", "status": "done", "message": "ok", "at": "2024-01-01"}])
-        )
-        job_runner._history_path = history_file
-        job_runner._history_loaded = False
-
+    def test_history_capped_keeps_most_recent(self):
+        for i in range(210):
+            append_job_history("scrape_leon", "done", f"run {i}")
         history = read_job_history()
-        assert any(e["job"] == "reset" for e in history)
+        # Oldest 10 runs (0-9) should have been trimmed away; the most
+        # recent entry (run 209) must be the last element.
+        assert history[-1]["message"] == "run 209"
+        assert all(e["message"] != "run 0" for e in history)

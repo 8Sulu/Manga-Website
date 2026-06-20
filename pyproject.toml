@@ -17,6 +17,12 @@ dependencies = [
     "lxml>=5.2",
     "gunicorn>=22.0",
     "python-dotenv>=1.0",
+    # Job queue (utils/job_runner.py) — Redis-backed job state shared across
+    # Gunicorn workers, with RQ dispatching the actual scrape/MAL-fetch work
+    # to a separate `rq worker` process. See utils/job_runner.py's module
+    # docstring for the full rationale.
+    "redis>=5.0",
+    "rq>=1.16",
 ]
 
 [project.optional-dependencies]

@@ -10,14 +10,15 @@
 #   right place, and wsgi_app is given as a full package path
 #   ("web.backend:app") so it resolves correctly regardless of cwd.
 #
-#   WORKERS: still 1, for the same reason as the bare-metal config — the
-#   job-tracking _jobs dict in utils/job_runner.py lives in process memory.
-#   See gunicorn.conf.py's header comment; the same migration path (Redis/
-#   RQ) applies here before scaling past one worker/container replica.
+#   WORKERS: as of the Redis/RQ job-queue migration (see
+#   utils/job_runner.py's module docstring), job state lives in Redis and
+#   scrapes run in a separate `rq worker` container — not inside a Gunicorn
+#   worker at all — so it's now safe to run more than one worker per
+#   replica. Bump GUNICORN_WORKERS in .env if you have the CPU to spare.
 
 import os
 
-workers = 1
+workers = int(os.getenv("GUNICORN_WORKERS", "2"))
 threads = int(os.getenv("GUNICORN_THREADS", "4"))
 worker_class = "gthread"
 
@@ -29,7 +30,7 @@ accesslog = "-"
 errorlog = "-"
 loglevel = os.getenv("GUNICORN_LOG_LEVEL", "info")
 
-# Restart a worker if a single request takes longer than 5 minutes
-# (long scrapes run in background threads, not in the request itself)
+# Per-request timeout — see the note in gunicorn.conf.py; scrapes run
+# entirely outside the request cycle now, this is just a generous safety net.
 timeout = 300
 graceful_timeout = 30

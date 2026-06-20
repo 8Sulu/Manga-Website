@@ -1,17 +1,25 @@
 # gunicorn.conf.py  (place next to backend.py in web/)
 #
-# WHY 1 WORKER:
-#   The job-tracking dict (_jobs) lives in process memory.  Multiple workers
-#   would each have their own copy, so /api/job/<name> would return stale
-#   data depending on which worker handled the request.
-#   1 worker + threads gives safe concurrency without needing Redis.
+# MULTI-WORKER SAFE as of the Redis/RQ job-queue migration:
+#   The old comment here said "1 worker, because the job-tracking dict
+#   lives in process memory." That's no longer true — job state now lives
+#   in Redis (see utils/job_runner.py's module docstring), and the actual
+#   scrape/MAL-fetch subprocess runs inside a completely separate
+#   `rq worker manga-jobs` process (manga-worker.service), not inside a
+#   Gunicorn worker at all. Any worker here can correctly answer
+#   /api/job/<name> regardless of which one (if any) called start_job().
+#
+#   Bump WORKERS via env var if you have the CPU cores to spare; a common
+#   starting point is (2 x cpu_cores) + 1.
 #
 # THREADS:
-#   4 threads handle up to 4 simultaneous requests (search, poll, etc.).
-#   Raise to 8 if you have ≥4 CPU cores and notice sluggish search under load.
+#   Threads still help with ordinary request concurrency (search, polling,
+#   etc.) within each worker process.
 
-workers = 1
-threads = 4
+import os
+
+workers = int(os.getenv("GUNICORN_WORKERS", "3"))
+threads = int(os.getenv("GUNICORN_THREADS", "4"))
 worker_class = "gthread"
 
 # Unix socket — nginx talks to gunicorn over this, no port needed
@@ -26,8 +34,11 @@ accesslog = "-"
 errorlog = "-"
 loglevel = "info"
 
-# Restart a worker if a single request takes longer than 5 minutes
-# (long scrapes run in background threads, not in the request itself)
+# Per-request timeout. Kept at the old value even though scrapes no longer
+# run inside a request at all (they're enqueued to manga-worker.service and
+# the request returns immediately) — this is now just a generous safety net
+# for any one HTTP request, not a scrape-duration ceiling. See
+# utils/job_runner.py's JOB_TIMEOUT for the actual scrape-duration limit.
 timeout = 300
 
 # Graceful shutdown timeout

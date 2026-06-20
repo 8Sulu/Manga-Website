@@ -1,0 +1,53 @@
+# /etc/systemd/system/manga-worker.service
+#
+# Runs the RQ worker that actually executes scrape_leon / scrape_broward /
+# get_manga jobs (see utils/job_runner.py). manga.service (the web app) only
+# enqueues jobs into Redis — this service is what dequeues and runs them.
+# Both must be installed and running for /admin's scrape buttons to do
+# anything.
+#
+# Install:
+#   sudo cp manga-worker.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now manga-worker
+#
+# Scaling: a single `rq worker` processes one job at a time (sequentially),
+# even across different job names — e.g. a queued scrape_broward run will
+# wait for an in-progress scrape_leon run to finish. That's an intentional,
+# safer default (no two scrapers hammering the network/DB at once), but if
+# you want true parallelism, copy this unit (e.g. manga-worker-2.service,
+# pointing at the same --url) and enable both — multiple `rq worker`
+# processes safely share one queue with no extra configuration.
+
+[Unit]
+Description=Leon County Manga Library — RQ worker (Redis Queue)
+After=network.target mysql.service redis-server.service
+Requires=mysql.service redis-server.service
+
+[Service]
+User=manga
+Group=manga
+
+WorkingDirectory=/opt/manga
+
+Environment=REDIS_URL=redis://localhost:6379/0
+ExecStart=/opt/manga/venv/bin/rq worker manga-jobs --url redis://localhost:6379/0
+
+# Restart automatically if the worker crashes
+Restart=on-failure
+RestartSec=5
+
+# Let an in-progress scrape's subprocess exit cleanly before the worker
+# process itself is killed on shutdown/restart.
+TimeoutStopSec=60
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=manga-worker
+
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target
