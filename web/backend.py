@@ -6,11 +6,12 @@ import threading
 import time
 from datetime import datetime, timezone
 
-from cachelib.file import FileSystemCache
+import redis
+from cachelib.redis import RedisCache
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session
 from flask_session import Session
 
-from config.settings import DATA_DIR, SCRIPTS_DIR
+from config.settings import SCRIPTS_DIR
 from utils.database_utils import (
     get_db_connection,
     execute_query,
@@ -37,8 +38,29 @@ app = Flask(__name__, static_folder="static")
 app.secret_key = os.getenv("FLASK_SECRET_KEY", secrets.token_hex(32))
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 
-_SESSION_DIR = DATA_DIR / "flask_sessions"
-_SESSION_DIR.mkdir(parents=True, exist_ok=True)
+# ── Session storage — Redis-backed, not the filesystem ──────────────────────
+#
+# Was SESSION_TYPE="cachelib" backed by cachelib.FileSystemCache, writing one
+# file per session under data/flask_sessions/. That was only ever safe with a
+# single Gunicorn worker: FileSystemCache.set() periodically calls
+# _remove_expired(), which globs the whole session directory and unlinks
+# files it judges stale. Once GUNICORN_WORKERS > 1 (bumped as part of the
+# Redis/RQ job-queue migration — see gunicorn.docker.conf.py — because job
+# *state* no longer needed a single process), two worker processes sweep the
+# same directory concurrently and one can unlink a file the instant before
+# another tries to open it, raising a bare OSError that cachelib only logs
+# and swallows. With enough accumulated session files (nothing was ever
+# pruning them externally), that sweep could also run long enough to blow
+# straight through nginx's 60s proxy_read_timeout — the 504s.
+#
+# Redis (already deployed for utils/job_runner.py's job queue) doesn't have
+# this problem: GET/SET/DEL/EXPIRE are atomic server-side, so any number of
+# Gunicorn workers — or container replicas — can share one session store
+# safely. NOTE: this client deliberately does NOT use decode_responses=True
+# (unlike job_runner's) — cachelib pickles session values to bytes, and
+# decoding them as UTF-8 text on read would corrupt them.
+_session_redis = redis.Redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"))
+
 app.config.update(
     SESSION_TYPE="cachelib",
     SESSION_PERMANENT=False,
@@ -46,7 +68,7 @@ app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
 )
-app.config["SESSION_CACHELIB"] = FileSystemCache(cache_dir=str(_SESSION_DIR), threshold=500)
+app.config["SESSION_CACHELIB"] = RedisCache(host=_session_redis, key_prefix="session:")
 Session(app)
 register_filters(app)
 

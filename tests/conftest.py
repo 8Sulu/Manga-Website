@@ -9,8 +9,9 @@ Key design decisions:
     test is imported, or patched per-test via monkeypatch / unittest.mock.
 
   - `app` fixture creates the Flask test client with SESSION_COOKIE_SECURE=False
-    (required for plain-HTTP test requests) and a temporary session directory
-    so tests don't pollute the repo's data/ folder.
+    (required for plain-HTTP test requests) and swaps the Redis-backed session
+    cache (see web/backend.py) for an in-memory cachelib.SimpleCache, so route
+    tests don't need a live Redis just to touch `session`.
 
   - `admin_client` gives an already-authenticated client so individual admin-
     route tests don't have to repeat the login dance.
@@ -104,20 +105,14 @@ sys.modules.setdefault("dotenv", _dotenv_stub)
 # ── Flask app fixture ─────────────────────────────────────────────────────────
 
 
-@pytest.fixture(scope="session")
-def _tmp_data(tmp_path_factory):
-    """A single temporary data dir reused across the whole session."""
-    return tmp_path_factory.mktemp("data")
-
-
 @pytest.fixture()
-def app(_tmp_data):
+def app():
     """
     A fresh Flask test app per test function.
 
     Patches:
       - SESSION_COOKIE_SECURE = False  (browsers reject Secure on plain HTTP)
-      - SESSION_FILE_DIR → temp dir   (no real data/ writes)
+      - SESSION_CACHELIB → in-memory cachelib.SimpleCache (no live Redis)
       - execute_query / execute_update → no-op stubs
       - get_library_ids → (1, 2)
     """
@@ -129,16 +124,28 @@ def app(_tmp_data):
         patch("utils.database_utils.execute_update", return_value=0),
         patch("utils.database_utils.get_library_ids", return_value=(1, 2)),
     ):
+        from cachelib import SimpleCache
+        from flask_session import Session
         from web.backend import app as flask_app
 
         flask_app.config.update(
             TESTING=True,
             SESSION_COOKIE_SECURE=False,
-            SESSION_FILE_DIR=str(_tmp_data / "sessions"),
             SECRET_KEY="test-secret",
             WTF_CSRF_ENABLED=False,
         )
-        Path(flask_app.config["SESSION_FILE_DIR"]).mkdir(parents=True, exist_ok=True)
+
+        # web/backend.py wires sessions to a real Redis connection at import
+        # time (see the comment above app.config["SESSION_CACHELIB"] there —
+        # short version: the old filesystem-backed session cache wasn't safe
+        # with >1 Gunicorn worker). Route tests touch `session` constantly
+        # (CSRF tokens, admin login, MAL filters) and must stay hermetic per
+        # this module's docstring, so swap in an in-memory SimpleCache and
+        # re-run Session(app) to rebuild app.session_interface against it.
+        # tests/test_job_runner.py is still the one place that deliberately
+        # exercises a real Redis.
+        flask_app.config["SESSION_CACHELIB"] = SimpleCache()
+        Session(flask_app)
 
         yield flask_app
 
