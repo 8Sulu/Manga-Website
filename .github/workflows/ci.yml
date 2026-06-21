@@ -53,6 +53,8 @@ jobs:
             utils/admin_utils.py \
             utils/search_utils.py \
             utils/job_runner.py \
+            utils/job_logging.py \
+            utils/fulltext.py \
             --ignore-missing-imports \
             --no-strict-optional
 

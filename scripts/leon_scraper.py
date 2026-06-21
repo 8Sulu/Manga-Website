@@ -12,7 +12,6 @@ Usage:
 from __future__ import annotations
 
 import json
-import logging
 import re
 import time
 from datetime import datetime, timezone
@@ -23,14 +22,15 @@ from bs4 import BeautifulSoup
 
 from config.settings import DATA_DIR, BRANCH_MAPPING
 from utils.database_utils import get_connection
+from utils.job_logging import get_logger, get_progress_logger
 from utils.scraper_utils import (
     extract_volume,
     is_novel,
     load_title_author_map,
 )
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
+plog = get_progress_logger(__name__)
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
@@ -270,7 +270,7 @@ def scrape(
             continue
 
         log.info(f"[{progress}/{len(pairs_to_scrape)}] (ID {manga_id}) {title!r} by {author!r}")
-        print(f"[{progress}/{len(pairs_to_scrape)}] {title}", flush=True)
+        plog.info(f"[{progress}/{len(pairs_to_scrape)}] {title}")
 
         catalog_keys: dict = {}
         page = 0
@@ -321,7 +321,6 @@ def _reconnect(conn, cursor):
     """
     try:
         conn.ping(reconnect=True, attempts=3, delay=5)
-        # ping may have swapped the underlying socket; get a fresh cursor
         cursor.close()
         return conn, conn.cursor()
     except Exception as e:
@@ -417,13 +416,13 @@ def write_to_db(books: list) -> str:
         if manga_batch >= DB_BATCH_SIZE:
             conn, cursor = _reconnect(conn, cursor)
             conn.commit()
-            print(f"  [DB] committed batch ({manga_batch} titles, {batch_rows} rows)", flush=True)
+            plog.info(f"  [DB] committed batch ({manga_batch} titles, {batch_rows} rows)")
             manga_batch = batch_rows = 0
 
     if batch_rows > 0:
         conn, cursor = _reconnect(conn, cursor)
         conn.commit()
-        print(f"  [DB] final commit ({manga_batch} titles, {batch_rows} rows)", flush=True)
+        plog.info(f"  [DB] final commit ({manga_batch} titles, {batch_rows} rows)")
 
     cursor.close()
     conn.close()
@@ -459,7 +458,7 @@ if __name__ == "__main__":
             lo, hi = args.range.split("-")
             books = scrape(start=max(1, int(lo)), end=int(hi), debug=args.debug)
         except (ValueError, IndexError):
-            print("Invalid --range format. Use START-END (e.g. --range 1-50)")
+            plog.error("Invalid --range format. Use START-END (e.g. --range 1-50)")
             raise SystemExit(1)
 
-    print(write_to_db(books))
+    plog.info(write_to_db(books))

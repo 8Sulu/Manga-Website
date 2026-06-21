@@ -3,12 +3,18 @@ tests/test_admin_utils.py
 
 Unit tests for utils/admin_utils.py.
 
-parse_range_str is the only pure function here — insert_csv talks to the DB
-and is integration-tested separately (or skipped in unit suite).
+parse_range_str and stamp_alembic_head are the pure-ish functions here —
+insert_csv talks to the DB and is integration-tested separately (or
+skipped in unit suite). stamp_alembic_head's only branch point worth
+testing is success vs. exception, so alembic.command.stamp is mocked
+rather than run against a real DB.
 """
 
+from unittest.mock import patch
+
 import pytest
-from utils.admin_utils import parse_range_str
+
+from utils.admin_utils import parse_range_str, stamp_alembic_head
 
 
 class TestParseRangeStr:
@@ -92,3 +98,17 @@ class TestParseRangeStr:
     )
     def test_max_titles_respected(self, s, max_t, expected):
         assert parse_range_str(s, max_t) == expected
+
+
+class TestStampAlembicHead:
+    def test_returns_success_message_on_success(self):
+        with patch("alembic.command.stamp") as mock_stamp:
+            result = stamp_alembic_head()
+        mock_stamp.assert_called_once()
+        assert result.startswith("✓")
+
+    def test_returns_failure_message_on_exception(self):
+        with patch("alembic.command.stamp", side_effect=Exception("boom")):
+            result = stamp_alembic_head()
+        assert result.startswith("✗")
+        assert "boom" in result

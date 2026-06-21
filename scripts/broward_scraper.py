@@ -27,6 +27,7 @@ from bs4 import BeautifulSoup
 
 from config.settings import BROWARD_BRANCH_MAPPING
 from utils.database_utils import get_connection
+from utils.job_logging import get_logger, get_progress_logger
 from utils.scraper_utils import (
     STATUS_PRIORITY,
     extract_volume,
@@ -34,7 +35,8 @@ from utils.scraper_utils import (
     load_title_author_map,
 )
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
+plog = get_progress_logger(__name__)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -270,8 +272,7 @@ def get_search_results(
             params.extend([("rw", str(offset)), ("isd", "true")])
 
         url = f"{BASE_URL}{CLIENT}/search/results"
-        if debug:
-            print(f"[DEBUG] search page {page}: {url} params={params}")
+        log.debug(f"search page {page}: {url} params={params}")
 
         try:
             r = session.get(url, params=params, headers=HEADERS, timeout=15, allow_redirects=True)
@@ -324,8 +325,7 @@ def get_search_results(
                 call_text = call_div.get_text(" ", strip=True) if call_div else ""
 
                 if is_novel(manga_type) and "GRAPHIC" in call_text.upper():
-                    if debug:
-                        print(f"[DEBUG] Skipping manga-format entry for novel {title_text_cell!r}")
+                    log.debug(f"Skipping manga-format entry for novel {title_text_cell!r}")
                     continue
 
                 volume = extract_volume(title_text_cell) or extract_volume(call_text)
@@ -384,8 +384,7 @@ def fetch_item_availability(
     ]
     lookup_headers = {**HEADERS, "sdcsrf": sdcsrf, "Content-Length": "0"}
 
-    if debug:
-        print(f"[DEBUG] lookuptitleinfo: {info_url}")
+    log.debug(f"lookuptitleinfo: {info_url}")
 
     for attempt in range(LOOKUP_MAX_RETRIES):
         try:
@@ -402,10 +401,9 @@ def fetch_item_availability(
                     }
                     for rec in data.get("childRecords", [])
                 ]
-                if debug:
-                    print(f"[DEBUG] item {item_id}: {len(copies)} copies")
-                    for c in copies:
-                        print(f"  [{'✓' if c['on_shelf'] else '✗'}] {c['library']} — {c['status']}")
+                log.debug(f"item {item_id}: {len(copies)} copies")
+                for c in copies:
+                    log.debug(f"  [{'✓' if c['on_shelf'] else '✗'}] {c['library']} — {c['status']}")
                 return copies
 
             if r.status_code in (429, 503):
@@ -471,8 +469,7 @@ def build_volume_branch_map(
 
     if unmatched:
         log.warning(f"  Unmatched branch names: {sorted(unmatched)}")
-        if debug:
-            print(f"[DEBUG] unmatched branches: {sorted(unmatched)}")
+        log.debug(f"unmatched branches: {sorted(unmatched)}")
 
     return dict(result)
 
@@ -481,20 +478,17 @@ def build_volume_branch_map(
 
 
 def process_batch(args: argparse.Namespace) -> None:
-    logging.basicConfig(
-        level=logging.DEBUG if args.debug else logging.INFO,
-        format="%(levelname)s %(message)s",
-    )
+    log.setLevel(logging.DEBUG if args.debug else logging.INFO)
 
     all_pairs = load_title_author_map()
     if not all_pairs:
-        print("[-] No titles found in DB.")
+        plog.info("[-] No titles found in DB.")
         return
 
     try:
         broward_library_id, branch_map = _load_broward_ids()
     except RuntimeError as e:
-        print(f"[-] {e}")
+        plog.info(f"[-] {e}")
         return
 
     if args.manga_ids:
@@ -505,16 +499,16 @@ def process_batch(args: argparse.Namespace) -> None:
             s, e = args.range.split("-")
             pairs = all_pairs[max(0, int(s) - 1) : int(e)]
         except (ValueError, IndexError):
-            print("[-] Invalid --range. Use START-END (e.g. --range 1-50)")
+            plog.info("[-] Invalid --range. Use START-END (e.g. --range 1-50)")
             return
 
     if not pairs:
-        print("[-] No valid titles matched the criteria.")
+        plog.info("[-] No valid titles matched the criteria.")
         return
 
-    print(f"[*] Broward library ID  : {broward_library_id}")
-    print(f"[*] Broward branch count: {len(branch_map)}")
-    print(f"[*] Scraping {len(pairs)} title(s)…\n")
+    plog.info(f"[*] Broward library ID  : {broward_library_id}")
+    plog.info(f"[*] Broward branch count: {len(branch_map)}")
+    plog.info(f"[*] Scraping {len(pairs)} title(s)…")
 
     csv_file = csv_writer = None
     if args.output:
@@ -523,7 +517,7 @@ def process_batch(args: argparse.Namespace) -> None:
         csv_file = open(out_path, "w", newline="", encoding="utf-8")
         csv_writer = csv.writer(csv_file)
         csv_writer.writerow(["Title", "Author", "ItemID", "Volume", "Library", "Status", "OnShelf"])
-        print(f"[*] CSV → {out_path}\n")
+        plog.info(f"[*] CSV → {out_path}")
 
     db_conn = get_connection()
     cursor = db_conn.cursor()
@@ -545,21 +539,18 @@ def process_batch(args: argparse.Namespace) -> None:
             log.warning(f"Index {idx} '{title}' — no author, skipping")
             continue
 
-        print(f"[{progress}/{len(pairs)}] {title}", flush=True)
+        plog.info(f"[{progress}/{len(pairs)}] {title}")
 
         items, sdcsrf = get_search_results(http_session, title, author, manga_type, args.debug)
         if not items:
-            print("  [-] No catalog entries found")
+            plog.info("  [-] No catalog entries found")
             continue
         if not sdcsrf:
-            print("  [-] Warning: no sdcsrf token — availability lookups may fail.")
+            plog.info("  [-] Warning: no sdcsrf token — availability lookups may fail.")
 
         item_copies: list[tuple[int, list[dict]]] = []
         for j, item in enumerate(items, 1):
-            print(
-                f"  [{j}/{len(items)}] fetching item {item['item_id']} (vol {item['volume']})",
-                flush=True,
-            )
+            plog.info(f"  [{j}/{len(items)}] fetching item {item['item_id']} (vol {item['volume']})")
             copies = fetch_item_availability(
                 http_session,
                 item["item_id"],
@@ -596,19 +587,17 @@ def process_batch(args: argparse.Namespace) -> None:
         total_copies = sum(len(c) for _, c in item_copies)
         vol_list = sorted(volume_branch_map)
         vol_display = str(vol_list) if len(vol_list) <= 10 else f"{vol_list[:5]}…"
-        print(
+        plog.info(
             f"  [{'✓' if avail_vols else '✗'}] "
             f"{avail_vols}/{total_vols} vols available "
-            f"({total_copies} copies) — vols {vol_display}",
-            flush=True,
+            f"({total_copies} copies) — vols {vol_display}"
         )
 
-        if args.debug:
-            for vol_num, branch_statuses in sorted(volume_branch_map.items()):
-                for bid, status in branch_statuses.items():
-                    bname = next((k for k, v in branch_map.items() if v == bid), str(bid))
-                    mark = "✓" if status == "Available" else ("~" if status == "On Hold" else "✗")
-                    print(f"  [{mark}] vol {vol_num} @ {bname} — {status}")
+        for vol_num, branch_statuses in sorted(volume_branch_map.items()):
+            for bid, status in branch_statuses.items():
+                bname = next((k for k, v in branch_map.items() if v == bid), str(bid))
+                mark = "✓" if status == "Available" else ("~" if status == "On Hold" else "✗")
+                log.debug(f"[{mark}] vol {vol_num} @ {bname} — {status}")
 
         if volume_branch_map:
             scraped_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
@@ -621,32 +610,32 @@ def process_batch(args: argparse.Namespace) -> None:
                 if batch_count >= DB_BATCH_SIZE:
                     db_conn, cursor = _reconnect(db_conn, cursor)
                     db_conn.commit()
-                    print(f"  [DB] committed batch of {batch_count} titles", flush=True)
+                    plog.info(f"  [DB] committed batch of {batch_count} titles")
                     batch_count = 0
                 else:
-                    print(f"  [DB] {msg}", flush=True)
+                    plog.info(f"  [DB] {msg}")
 
             except Exception as e:
                 db_conn.rollback()
                 batch_count = 0
-                print(f"  [DB] Error: {e}", flush=True)
+                plog.info(f"  [DB] Error: {e}")
         else:
-            print("  [--] No matched branches to store", flush=True)
+            plog.info("  [--] No matched branches to store")
 
     if batch_count > 0:
         try:
             db_conn, cursor = _reconnect(db_conn, cursor)
             db_conn.commit()
-            print(f"[DB] final commit ({batch_count} title(s))", flush=True)
+            plog.info(f"[DB] final commit ({batch_count} title(s))")
         except Exception as e:
             db_conn.rollback()
-            print(f"[DB] final commit error: {e}", flush=True)
+            plog.info(f"[DB] final commit error: {e}")
 
     cursor.close()
     db_conn.close()
     if csv_file:
         csv_file.close()
-    print("\n[*] Done.")
+    plog.info("[*] Done.")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

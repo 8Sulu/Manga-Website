@@ -19,7 +19,14 @@ from utils.database_utils import (
     get_library_ids,
     invalidate_library_id_cache,
 )
-from utils.admin_utils import SCHEMA, INSERT_OPS, insert_csv, parse_range_str
+from utils.admin_utils import (
+    SCHEMA,
+    INSERT_OPS,
+    insert_csv,
+    parse_range_str,
+    stamp_alembic_head,
+)
+from utils.fulltext import build_boolean_query
 from utils.job_runner import (
     start_job,
     stop_job,
@@ -301,6 +308,11 @@ def admin_reset():
     for filename, query in INSERT_OPS:
         messages.append(insert_csv(filename, query))
 
+    # Keep Alembic's bookkeeping table truthful — see stamp_alembic_head()'s
+    # docstring in utils/admin_utils.py for why this is necessary, not just
+    # nice-to-have.
+    messages.append(stamp_alembic_head())
+
     invalidate_library_id_cache()
     _invalidate_missing_cache()
     append_job_history("reset", "done", " · ".join(messages))
@@ -314,6 +326,12 @@ def admin_reset():
 def home():
     lcpl_id, broward_id = get_library_ids()
     return render_template("index.html", LCPL_LIBRARY_ID=lcpl_id, BROWARD_LIBRARY_ID=broward_id)
+
+
+@app.route("/api/docs")
+def api_docs():
+    """Swagger UI for web/static/openapi.yaml. Public/read-only — no auth needed."""
+    return render_template("api_docs.html")
 
 
 # ── API ────────────────────────────────────────────────────────────────────────
@@ -357,11 +375,28 @@ def api_suggestions():
     if rate_limited(f"suggest:{ip}", limit=120, window=60):
         return jsonify([]), 429
     try:
-        rows = execute_query(
-            "SELECT MangaID, Title, Type, Score FROM manga "
-            "WHERE Title LIKE %s ORDER BY Score DESC LIMIT 8",
-            (f"%{q}%",),
-        )
+        bool_q = build_boolean_query(q)
+        if bool_q:
+            # BOOLEAN MODE + prefix truncation ('*'), ranked by relevance —
+            # see utils/fulltext.py and README.md's "Full-Text Search"
+            # section. Replaces a plain `Title LIKE '%q%'` scan, which
+            # can't use any index and forces MySQL to examine every row on
+            # every keystroke (item #8).
+            rows = execute_query(
+                "SELECT MangaID, Title, Type, Score, "
+                "MATCH(Title) AGAINST (%s IN BOOLEAN MODE) AS relevance "
+                "FROM manga WHERE MATCH(Title) AGAINST (%s IN BOOLEAN MODE) "
+                "ORDER BY relevance DESC, Score DESC LIMIT 8",
+                (bool_q, bool_q),
+            )
+        else:
+            # q was nothing but short words / FULLTEXT operator characters
+            # — FULLTEXT can't help here, fall back to the old LIKE scan.
+            rows = execute_query(
+                "SELECT MangaID, Title, Type, Score FROM manga "
+                "WHERE Title LIKE %s ORDER BY Score DESC LIMIT 8",
+                (f"%{q}%",),
+            )
         return jsonify(
             [
                 {
@@ -714,8 +749,27 @@ def search():
     conditions = ["b.BranchName IS NOT NULL", "b.BranchID IS NOT NULL"]
     params: list = []
     if title:
-        conditions.append("m.Title LIKE %s")
-        params.append(f"%{title}%")
+        bool_q = build_boolean_query(title)
+        if bool_q:
+            # FULLTEXT match runs as a subquery against `manga` alone (not
+            # MATCH() directly in this multi-join WHERE clause) so MySQL
+            # reliably uses the FULLTEXT index instead of leaving it to the
+            # optimizer to push the condition through four joins. See
+            # utils/fulltext.py and README.md's "Full-Text Search" section
+            # (item #8).
+            conditions.append(
+                "m.MangaID IN ("
+                "SELECT MangaID FROM manga WHERE MATCH(Title) AGAINST (%s IN BOOLEAN MODE)"
+                ")"
+            )
+            params.append(bool_q)
+        else:
+            # Every word in `title` was shorter than the FULLTEXT index's
+            # minimum indexed word length (or was nothing but BOOLEAN MODE
+            # operator characters) — fall back to the old LIKE scan rather
+            # than silently returning zero results.
+            conditions.append("m.Title LIKE %s")
+            params.append(f"%{title}%")
     if type_:
         conditions.append("m.Type = %s")
         params.append(type_)

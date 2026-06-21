@@ -23,6 +23,14 @@ dependencies = [
     # docstring for the full rationale.
     "redis>=5.0",
     "rq>=1.16",
+    # Schema migrations (migrations/) — replaces hand-editing the SCHEMA
+    # string in utils/admin_utils.py for anything that isn't a full nuke.
+    # alembic pulls sqlalchemy in automatically as a hard dependency; it's
+    # listed explicitly too since migrations/env.py imports it directly to
+    # build the connection URL. No ORM layer is introduced anywhere else —
+    # see migrations/env.py's module docstring.
+    "alembic>=1.13",
+    "sqlalchemy>=2.0",
 ]
 
 [project.optional-dependencies]

@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>API Docs — Manga Tracker</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+  <style>body { margin: 0; background: #fff; }</style>
+</head>
+<body>
+<div id="swagger-ui"></div>
+<script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+<script>
+  window.onload = () => {
+    window.ui = SwaggerUIBundle({
+      url: "{{ url_for('static', filename='openapi.yaml') }}",
+      dom_id: "#swagger-ui",
+      presets: [SwaggerUIBundle.presets.apis],
+    });
+  };
+</script>
+</body>
+</html>

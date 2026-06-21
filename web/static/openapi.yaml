@@ -1,0 +1,311 @@
+openapi: 3.0.3
+info:
+  title: Manga Library Tracker API
+  description: >
+    Aggregates manga volume availability across Leon County Public Library
+    (LCPL) and Broward County Library (BCL), cross-referenced with
+    MyAnimeList rankings, scores, and cover art.
+  version: "1.0.0"
+servers:
+  - url: https://manga-website.duckdns.org
+    description: Production
+  - url: http://localhost:5000
+    description: Local dev server
+
+tags:
+  - name: Public
+  - name: Search
+  - name: Admin
+  - name: Jobs
+  - name: MAL
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: session
+      description: Flask session cookie, set after a successful POST to /admin/login.
+    csrfToken:
+      type: apiKey
+      in: header
+      name: X-CSRF-Token
+      description: >
+        Required on every session-mutating POST/PUT/PATCH/DELETE request.
+        Value must match the session's csrf_token exactly (constant-time
+        compared) or the request is rejected with 403.
+  schemas:
+    JobName:
+      type: string
+      enum: [scrape_leon, scrape_broward, get_manga]
+    JobStatus:
+      type: object
+      properties:
+        running: { type: boolean }
+        progress: { type: integer, minimum: 0, maximum: 100 }
+        message: { type: string }
+    Suggestion:
+      type: object
+      properties:
+        manga_id: { type: integer }
+        title: { type: string }
+        type: { type: string }
+        score: { type: string }
+    Stats:
+      type: object
+      properties:
+        volumes: { type: integer }
+        titles: { type: integer }
+        last_scraped: { type: string }
+
+paths:
+  /:
+    get:
+      tags: [Public]
+      summary: Home / search landing page
+      responses:
+        "200": { description: Rendered HTML search page }
+
+  /search:
+    get:
+      tags: [Search]
+      summary: Search manga titles with availability filters
+      description: >
+        `title` is matched via MySQL FULLTEXT BOOLEAN MODE with prefix
+        truncation when at least one word in the query is 3+ characters
+        (the FULLTEXT index's minimum indexed word length); otherwise
+        falls back to a LIKE scan. See utils/fulltext.py.
+      parameters:
+        - { name: title, in: query, schema: { type: string } }
+        - { name: type, in: query, schema: { type: string }, example: Manga }
+        - { name: branch, in: query, schema: { type: string } }
+        - { name: volume, in: query, schema: { type: integer } }
+        - { name: avail, in: query, schema: { type: string, enum: [available, out, ""] } }
+        - { name: library, in: query, schema: { type: integer }, description: LibraryID }
+        - { name: no_vol1, in: query, schema: { type: string, enum: ["1", ""] } }
+        - { name: sort, in: query, schema: { type: string, enum: [score, title, avail, vols] }, default: score }
+        - { name: sort_dir, in: query, schema: { type: string, enum: [asc, desc] }, default: desc }
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: per_page, in: query, schema: { type: integer, default: 50 } }
+      responses:
+        "200": { description: Rendered HTML results page }
+
+  /api/stats:
+    get:
+      tags: [Public]
+      summary: Aggregate counts for the homepage stat tiles
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Stats" }
+
+  /api/suggestions:
+    get:
+      tags: [Search]
+      summary: Typeahead title suggestions
+      description: FULLTEXT BOOLEAN MODE with prefix matching; falls back to LIKE for very short queries.
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string, minLength: 2 } }
+      responses:
+        "200":
+          description: Up to 8 matches, ranked by relevance then MAL score
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Suggestion" }
+
+  /api/job/{name}:
+    get:
+      tags: [Jobs]
+      summary: Poll job status
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: name, in: path, required: true, schema: { $ref: "#/components/schemas/JobName" } }
+      responses:
+        "200":
+          description: Current status
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JobStatus" }
+        "400": { description: Unknown job name }
+        "401": { description: Not authenticated }
+
+  /api/job/stop/{name}:
+    post:
+      tags: [Jobs]
+      summary: Request graceful stop of a running job
+      security: [{ sessionCookie: [] }, { csrfToken: [] }]
+      parameters:
+        - { name: name, in: path, required: true, schema: { $ref: "#/components/schemas/JobName" } }
+      responses:
+        "200": { description: Stop signal sent, or job wasn't running }
+        "403": { description: Missing/invalid CSRF token }
+
+  /api/job_history:
+    get:
+      tags: [Jobs]
+      summary: Last 50 job runs, most recent first
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: OK }
+
+  /api/missing_titles:
+    get:
+      tags: [Admin]
+      summary: Count of titles with no scraped availability, per library
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: OK }
+
+  /api/delete_title_results:
+    post:
+      tags: [Admin]
+      summary: Clear stored availability for one MangaID (optionally scoped to one library)
+      security: [{ sessionCookie: [] }, { csrfToken: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [manga_id]
+              properties:
+                manga_id: { type: integer }
+                library: { type: integer, nullable: true }
+      responses:
+        "200": { description: OK }
+        "400": { description: Missing manga_id }
+        "500": { description: DB error }
+
+  /api/title_volumes/{manga_id}:
+    get:
+      tags: [Admin]
+      summary: Per-volume, per-branch breakdown for one title (debug/admin view)
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: manga_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: OK }
+
+  /api/mal/mangalist:
+    get:
+      tags: [MAL]
+      summary: Kick off a background fetch of the authenticated user's MAL list
+      responses:
+        "200": { description: Returns a job_id to poll }
+        "503": { description: MAL_ACCESS_TOKEN not configured }
+        "429": { description: Rate limited }
+
+  /api/mal/mangalist/status/{job_id}:
+    get:
+      tags: [MAL]
+      summary: Poll a MAL list fetch job
+      parameters:
+        - { name: job_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Running, or done with data }
+        "404": { description: Unknown job_id }
+        "502": { description: MAL API error }
+
+  /api/mal/set_filter:
+    post:
+      tags: [MAL]
+      summary: Save MAL list data and/or reading-status include/exclude filters into the session
+      security: [{ csrfToken: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data: { type: object }
+                filters:
+                  type: object
+                  properties:
+                    reading: { type: string, enum: ["", include, exclude] }
+                    completed: { type: string, enum: ["", include, exclude] }
+                    on_hold: { type: string, enum: ["", include, exclude] }
+                    dropped: { type: string, enum: ["", include, exclude] }
+                    plan_to_read: { type: string, enum: ["", include, exclude] }
+      responses:
+        "200": { description: OK }
+        "403": { description: Missing/invalid CSRF token }
+
+  /api/mal/clear_filter:
+    post:
+      tags: [MAL]
+      summary: Clear MAL session data and filters
+      security: [{ csrfToken: [] }]
+      responses:
+        "200": { description: OK }
+
+  /admin:
+    get:
+      tags: [Admin]
+      summary: Admin dashboard
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Rendered HTML dashboard }
+        "302": { description: Redirect to login if unauthenticated }
+    post:
+      tags: [Admin]
+      summary: Trigger scrape_leon / scrape_broward / get_manga jobs
+      security: [{ sessionCookie: [] }, { csrfToken: [] }]
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                action: { type: string, enum: [scrape_leon, scrape_broward, get_manga] }
+                range: { type: string, example: "1-50" }
+                only_new: { type: string, enum: ["1"] }
+                manga_id: { type: string }
+                offset: { type: string }
+      responses:
+        "200": { description: Job started }
+        "400": { description: Validation error (missing range / bad offset) }
+        "409": { description: Job already running }
+
+  /admin/reset:
+    post:
+      tags: [Admin]
+      summary: Drop and recreate all tables, reseed from data/*.csv, stamp Alembic at head
+      security: [{ sessionCookie: [] }, { csrfToken: [] }]
+      responses:
+        "200": { description: OK }
+        "500": { description: Schema error }
+
+  /admin/login:
+    get:
+      tags: [Admin]
+      summary: Login form
+      responses: { "200": { description: OK } }
+    post:
+      tags: [Admin]
+      summary: Authenticate
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                password: { type: string }
+                csrf_token: { type: string }
+      responses:
+        "302": { description: Redirect to /admin on success }
+        "200": { description: Re-rendered form with error }
+
+  /admin/logout:
+    get:
+      tags: [Admin]
+      responses: { "302": { description: Redirect home } }
+
+  /api/docs:
+    get:
+      tags: [Public]
+      summary: This Swagger UI page
+      responses:
+        "200": { description: Rendered HTML }
