@@ -550,7 +550,9 @@ def process_batch(args: argparse.Namespace) -> None:
 
         item_copies: list[tuple[int, list[dict]]] = []
         for j, item in enumerate(items, 1):
-            plog.info(f"  [{j}/{len(items)}] fetching item {item['item_id']} (vol {item['volume']})")
+            plog.info(
+                f"  [{j}/{len(items)}] fetching item {item['item_id']} (vol {item['volume']})"
+            )
             copies = fetch_item_availability(
                 http_session,
                 item["item_id"],
