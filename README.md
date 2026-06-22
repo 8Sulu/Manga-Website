@@ -13,8 +13,7 @@ A full-stack web application that aggregates manga and light novel availability 
 ## Screenshots
 
 <!-- SCREENSHOT: Home page. Hero section with the search bar, the three stat tiles (volumes / titles / libraries), and the filter pill row underneath. Capture with the search box empty, before any results. -->
-![Home page with search bar and live library stats](docs/screenshots/home.png)
-
+![Home page with search bar and live library stats](docs/screenshots/home.png)<br>
 *Instant search, live stats, and library/availability filters.*
 
 <!-- SCREENSHOT: Search results grid. Search for something with several hits (e.g. "one") so the grid is full. Capture with a mix of available/checked-out badges visible across cards. -->
