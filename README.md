@@ -46,17 +46,16 @@ Most library catalogs are clunky, slow, and built for finding one book at a time
 - Instant title search with typeahead autocomplete (MySQL FULLTEXT, not a linear scan)
 - Filter by type, branch, library system, and availability status
 - Cover art, score, volume count, and author sourced from MyAnimeList
-- Per-volume, per-branch availability grid for LCPL (7 branches)
-- Title-level availability summary for Broward County (37 branches)
+- Per-volume, per-branch availability grid for LCPL (7 branches) and BCL (37 branches)
 - Optional MAL OAuth2 login to filter results by your own reading list status
 
 **Admin dashboard** *(password-protected)*
 - Three-stage data pipeline: fetch MAL rankings → scrape LCPL → scrape Broward
 - Live job progress with stop controls, backed by a Redis/RQ queue — accurate no matter which Gunicorn worker handles the polling request
 - Range and "only missing" targeting for incremental scrapes
-- Manual overrides: delete stale entries, re-scrape a single title
+- Re-scrape a single title
 - Collection stats by branch/library, full job history log
-- One-click database reset with CSV re-seed
+- Two-click database reset with CSV re-seed
 
 ---
 
@@ -132,19 +131,19 @@ DB calls are mocked in `tests/conftest.py` — no live MySQL needed for most of 
 ## Architecture
 
 ```
-┌───────────────────────────────────────────────────────────┐
+┌────────────────────────────────────────────────────────────┐
 │              Flask App (N Gunicorn workers)                │
 │  /search  /admin  /api/stats  /api/job/*  /api/suggestions │
 └──────────────┬───────────────────────┬─────────────────────┘
                │                       │ enqueue job / poll status
     ┌──────────▼────────┐    ┌─────────▼─────────────────┐
     │   MySQL Database  │    │  Redis                    │
-    │  manga             │    │  job:state:{name}  (HASH) │
-    │  library           │    │  job:history       (LIST) │
-    │  branch             │    │  manga-jobs        (queue)│
-    │  availability       │    └─────────┬─────────────────┘
-    │  branch_avail...     │             │ dequeue
-    └───────────▲──────────┘    ┌─────────▼─────────────────┐
+    │  manga            │    │  job:state:{name}  (HASH) │
+    │  library          │    │  job:history       (LIST) │
+    │  branch           │    │  manga-jobs        (queue)│
+    │  availability     │    └─────────────┬─────────────┘
+    │  branch_avail...  │                  │ dequeue
+    └───────────▲───────┘        ┌─────────▼──────────────────┐
                 │                │  rq worker process(es)     │
                 └────────────────┤  get_manga.py              │
                                  │  leon_scraper.py           │
