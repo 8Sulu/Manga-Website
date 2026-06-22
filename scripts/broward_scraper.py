@@ -26,7 +26,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from config.settings import BROWARD_BRANCH_MAPPING
-from utils.database_utils import get_connection
+from utils.database_utils import get_connection, reconnect as _reconnect
 from utils.job_logging import get_logger, get_progress_logger
 from utils.scraper_utils import (
     STATUS_PRIORITY,
@@ -100,30 +100,6 @@ def _load_broward_ids() -> tuple[int, dict[str, int]]:
     )
     branch_map = {r["BranchName"]: r["BranchID"] for r in branch_rows}
     return broward_library_id, branch_map
-
-
-def _reconnect(conn, cursor):
-    """
-    Ping the connection and reconnect if it has gone away.
-    Returns (conn, cursor) — always use the returned pair, never the originals.
-    """
-    try:
-        conn.ping(reconnect=True, attempts=3, delay=5)
-        cursor.close()
-        return conn, conn.cursor()
-    except Exception as e:
-        log.warning(f"DB ping failed, opening fresh connection: {e}")
-        try:
-            cursor.close()
-        except Exception:
-            pass
-        try:
-            conn.close()
-        except Exception:
-            pass
-        conn = get_connection()
-        cursor = conn.cursor()
-        return conn, cursor
 
 
 def _upsert_results(
@@ -394,7 +370,9 @@ def fetch_item_availability(
                 log.debug(f"item {item_id}: {len(copies)} copies")
                 for c in copies:
                     norm = normalize_status(c["status"])
-                    log.debug(f"  [{'✓' if norm == 'Available' else '✗'}] {c['library']} — {c['status']}")
+                    log.debug(
+                        f"  [{'✓' if norm == 'Available' else '✗'}] {c['library']} — {c['status']}"
+                    )
                 return copies
 
             if r.status_code in (429, 503):

@@ -103,6 +103,24 @@ class TestPublicRoutes:
             resp = client.get("/search?title=Berserk")
         assert resp.status_code == 200
 
+    def test_search_with_non_numeric_library_filter_does_not_500(self, client):
+        with (
+            patch("web.backend.execute_query", return_value=[]),
+            patch("web.backend.get_library_ids", return_value=(1, 2)),
+            patch("web.backend.render_template", return_value="<html/>"),
+        ):
+            resp = client.get("/search?library=abc")
+        assert resp.status_code == 200
+
+    def test_search_with_non_numeric_volume_does_not_error(self, client):
+        with (
+            patch("web.backend.execute_query", return_value=[]),
+            patch("web.backend.get_library_ids", return_value=(1, 2)),
+            patch("web.backend.render_template", return_value="<html/>"),
+        ):
+            resp = client.get("/search?volume=abc")
+        assert resp.status_code == 200
+
     def test_search_passes_mal_session_data(self, client):
         with client.session_transaction() as sess:
             sess["mal_data"] = {"1": {"status": "reading", "score": 0, "num_volumes_read": 0}}
@@ -114,7 +132,6 @@ class TestPublicRoutes:
             patch("web.backend.render_template", return_value="<html/>") as mock_rt,
         ):
             client.get("/search")
-
         _, kwargs = mock_rt.call_args
         assert kwargs.get("mal_loaded") is True
         assert kwargs.get("mal_active") is True

@@ -190,7 +190,8 @@ def admin():
             HAVING COUNT(DISTINCT CONCAT(a.MangaID, '-', a.Volume)) > 0
             ORDER BY l.LibraryName, VolumeCount DESC
         """)
-    except Exception:
+    except Exception as e:
+        app.logger.warning(f"branch-holdings query failed: {e}")
         manga_per_library = []
 
     return render_template(
@@ -474,7 +475,8 @@ def _missing_manga_ids(library_pattern: str) -> list[int]:
             )
         }
         result = [mid for mid in manga_ids if mid not in scraped]
-    except Exception:
+    except Exception as e:
+        app.logger.warning(f"_missing_manga_ids({library_pattern!r}) failed: {e}")
         result = []
 
     _missing_cache[library_pattern] = (now, result)
@@ -773,13 +775,13 @@ def search():
     if type_:
         conditions.append("m.Type = %s")
         params.append(type_)
-    if volume:
+    if volume and volume.isdigit():
         conditions.append("a.Volume = %s")
-        params.append(volume)
+        params.append(int(volume))
     if branch:
         conditions.append("b.BranchName = %s")
         params.append(branch)
-    if lib_filter:
+    if lib_filter and lib_filter.isdigit():
         conditions.append("b.LibraryID = %s")
         params.append(int(lib_filter))
 
@@ -864,7 +866,8 @@ def _titles_count() -> int:
     try:
         res = execute_query("SELECT COUNT(*) AS n FROM manga", fetch_all=False)
         return res["n"] if res else 0
-    except Exception:
+    except Exception as e:
+        app.logger.warning(f"_titles_count failed, falling back to 9999: {e}")
         return 9999
 
 

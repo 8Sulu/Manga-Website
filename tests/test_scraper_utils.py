@@ -258,7 +258,7 @@ class TestBranchShort:
             ("Bruce J. Host Northeast Branch Library", "North"),
             ("South Regional/Broward College Library", "South"),
             ("West Regional Library", "West"),
-            ("Weston Branch", "Weston"), 
+            ("Weston Branch", "Weston"),
             ("Hollywood Branch", "Hollywood"),
             # "central" fires before "lauderhill" in the map
             ("Lauderhill Central Park Library", "Central"),

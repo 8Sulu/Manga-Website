@@ -55,6 +55,7 @@ jobs:
             utils/job_runner.py \
             utils/job_logging.py \
             utils/fulltext.py \
+            utils/database_utils.py \
             --ignore-missing-imports \
             --no-strict-optional
 

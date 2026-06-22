@@ -21,7 +21,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from config.settings import DATA_DIR, BRANCH_MAPPING
-from utils.database_utils import get_connection
+from utils.database_utils import get_connection, reconnect as _reconnect
 from utils.job_logging import get_logger, get_progress_logger
 from utils.scraper_utils import (
     extract_volume,
@@ -312,30 +312,6 @@ def scrape(
 
 
 # ── Database write with batch commits ─────────────────────────────────────────
-
-
-def _reconnect(conn, cursor):
-    """
-    Ping the connection and reconnect if it has gone away.
-    Returns (conn, cursor) — always use the returned pair, never the originals.
-    """
-    try:
-        conn.ping(reconnect=True, attempts=3, delay=5)
-        cursor.close()
-        return conn, conn.cursor()
-    except Exception as e:
-        log.warning(f"DB ping failed, opening fresh connection: {e}")
-        try:
-            cursor.close()
-        except Exception:
-            pass
-        try:
-            conn.close()
-        except Exception:
-            pass
-        conn = get_connection()
-        cursor = conn.cursor()
-        return conn, cursor
 
 
 def write_to_db(books: list) -> str:

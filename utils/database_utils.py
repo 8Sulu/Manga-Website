@@ -19,6 +19,7 @@ Exports:
 
 from __future__ import annotations
 
+import logging
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
@@ -31,6 +32,7 @@ if TYPE_CHECKING:
     from mysql.connector.abstracts import MySQLConnectionAbstract
     from mysql.connector.pooling import PooledMySQLConnection
 
+log = logging.getLogger(__name__)
 
 # ── Raw connection (scrapers) ──────────────────────────────────────────────────
 
@@ -43,6 +45,35 @@ def get_connection() -> PooledMySQLConnection | MySQLConnectionAbstract:
     Use the context managers below for Flask route handlers instead.
     """
     return mysql.connector.connect(**DB_CONFIG)
+
+
+def reconnect(conn, cursor):
+    """
+    Ping a connection and reopen it if it's gone away (e.g. MySQL's
+    wait_timeout closing an idle connection mid-scrape). Returns (conn,
+    cursor) — callers must use the returned pair, never the originals.
+
+    Shared by leon_scraper.py and broward_scraper.py, which used to each
+    carry an identical standalone copy — same drift risk as the
+    ON_SHELF_STATUSES bug, caught here before it had the chance to diverge.
+    """
+    try:
+        conn.ping(reconnect=True, attempts=3, delay=5)
+        cursor.close()
+        return conn, conn.cursor()
+    except Exception as e:
+        log.warning(f"DB ping failed, opening fresh connection: {e}")
+        try:
+            cursor.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
+        conn = get_connection()
+        cursor = conn.cursor()
+        return conn, cursor
 
 
 # ── Context managers (Flask routes) ───────────────────────────────────────────
@@ -135,13 +166,6 @@ def invalidate_library_id_cache() -> None:
 
 
 def get_library_ids() -> tuple[int, int]:
-    """
-    Return (lcpl_library_id, broward_library_id).
-
-    Result is cached for the lifetime of the process.  Falls back to (1, 2)
-    if the library table is empty or inaccessible so the rest of the app
-    degrades gracefully rather than crashing.
-    """
     global _library_id_cache
     if _library_id_cache is not None:
         return _library_id_cache
@@ -158,16 +182,21 @@ def get_library_ids() -> tuple[int, int]:
         if lcpl is not None and broward is not None:
             _library_id_cache = (lcpl, broward)
             return _library_id_cache
-    except Exception:
-        pass
+        log.warning("get_library_ids: name match incomplete (lcpl=%s, broward=%s)", lcpl, broward)
+    except Exception as e:
+        log.warning("get_library_ids: name-match query failed: %s", e)
 
-    # Fallback: assume insertion order 1, 2 (matches libraries.csv seed)
     try:
         rows = execute_query("SELECT LibraryID FROM library ORDER BY LibraryID LIMIT 2")
         if len(rows) >= 2:
             _library_id_cache = (rows[0]["LibraryID"], rows[1]["LibraryID"])
+            log.warning("get_library_ids: using insertion-order fallback %s", _library_id_cache)
             return _library_id_cache
-    except Exception:
-        pass
+    except Exception as e:
+        log.error("get_library_ids: insertion-order fallback failed: %s", e)
 
+    log.error(
+        "get_library_ids: all lookups failed — hardcoding (1, 2), which is known "
+        "wrong for this DB (Broward is 15, not 2). Fix the library table."
+    )
     return 1, 2
