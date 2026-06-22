@@ -356,8 +356,9 @@ def api_stats():
         for log in reversed(read_job_history()):
             if log["job"] in ("scrape_leon", "scrape_broward") and log["status"] == "done":
                 try:
-                    dt = datetime.fromisoformat(log["at"])
-                    last_scraped = dt.strftime("Scraped %b %-d at %-I:%M %p")
+                    # Validate that it is a parseable timestamp string
+                    datetime.fromisoformat(log["at"])
+                    last_scraped = log["at"]  # Fixed: Save straight to the returned variable
                     break
                 except ValueError:
                     pass
@@ -365,7 +366,6 @@ def api_stats():
         return jsonify({"volumes": volumes, "titles": titles, "last_scraped": last_scraped})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 @app.route("/api/suggestions")
 def api_suggestions():

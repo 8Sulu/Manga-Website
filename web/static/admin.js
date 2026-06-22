@@ -103,9 +103,26 @@ async function loadStats() {
         const resp = await fetch('/api/stats');
         if (!resp.ok) return;
         const { volumes, titles, last_scraped } = await resp.json();
+        
         setText('stat-volumes',      volumes?.toLocaleString() ?? '—');
         setText('stat-titles',       titles?.toLocaleString()  ?? '—');
-        setText('stat-last-scraped', last_scraped ?? '—');
+        
+        // --- Timezone and Fallback Handling ---
+        let displayScraped = 'Never scraped';
+        
+        if (last_scraped && last_scraped !== 'Never scraped') {
+            const dt = new Date(last_scraped);
+            
+            if (!isNaN(dt.getTime())) { // Safe check for valid browser date parsing
+                const datePart = dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                const timePart = dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+                displayScraped = `Scraped ${datePart} at ${timePart}`;
+            }
+        }
+        
+        setText('stat-last-scraped', displayScraped);
+        // --------------------------------------
+        
     } catch { /* ignore */ }
 }
 
