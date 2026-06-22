@@ -30,11 +30,11 @@ STATUS_PRIORITY: dict[str, int] = {
 }
 
 
-# ── Status normalisation (FIX #4: exact-match set, no substring collisions) ───
+# ── Status normalisation — exact-match set, no substring collisions ───────────
 #
 # Substring matching on raw location strings causes false positives:
 # "Non-Youth Fiction" matches "Youth", "Young Adult Non-Fiction" matches
-# "Adult".  Exact matching against the lowercased string prevents this.
+# "Adult". Exact matching against the lowercased string prevents this.
 
 _ON_SHELF_EXACT: frozenset[str] = frozenset(
     {
@@ -169,8 +169,8 @@ def is_novel(manga_type: str) -> bool:
 
 
 # ── TitleRow — shared return type for load_title_author_map() ─────────────────
-# FIX #5: TitleRow is kept so external callers can import it if needed,
-# and the return type annotation is accurate.
+# Exported so external callers can import TitleRow directly if needed, and so
+# load_title_author_map's return type annotation stays accurate.
 
 
 class TitleRow(NamedTuple):

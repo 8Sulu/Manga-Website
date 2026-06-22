@@ -4,7 +4,7 @@ utils/fulltext.py
 Helpers for MySQL FULLTEXT BOOLEAN MODE search, used by both the
 /api/suggestions typeahead and /search's title filter — replaces the old
 `Title LIKE '%q%'` scan, which can't use any index and forces MySQL to
-examine every row in `manga` on every keystroke (item #8).
+examine every row in `manga` on every keystroke.
 
 WHY BOOLEAN MODE WITH PREFIX TRUNCATION (`word*`), NOT NATURAL LANGUAGE MODE:
 NATURAL LANGUAGE MODE only matches whole indexed words (after MySQL's
@@ -32,7 +32,8 @@ import re
 
 # Characters with special meaning inside MySQL BOOLEAN MODE search strings.
 # Stripped from user input so a typed "+", "-", "*", etc. can't change
-# query semantics (e.g. force-exclude a word, or break the query outright).
+# query semantics (e.g. force-exclude a word, group terms, etc.) or break
+# the query outright.
 _FT_OPERATOR_RE = re.compile(r'[+\-><()~*"@]')
 
 # Matches InnoDB's default innodb_ft_min_token_size — words shorter than

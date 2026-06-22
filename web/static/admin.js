@@ -1,7 +1,7 @@
 /**
  * static/admin.js
  *
- * Admin dashboard JS — extracted from inline <script> in admin.html (#6).
+ * Admin dashboard JS, extracted from an inline <script> in admin.html.
  * Handles job polling, stats, branch chart, and all admin actions.
  */
 

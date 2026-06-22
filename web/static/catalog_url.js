@@ -1,10 +1,9 @@
 /**
  * static/catalog_url.js
  *
- * Builds SirsiDynix catalog search URLs on the client side, on card expand.
- * This replaces the server-side _lcpl_search_url / _broward_search_url
- * construction that previously ran for every row regardless of whether the
- * user ever opened the card (#4).
+ * Builds SirsiDynix catalog search URLs on the client side, on card expand,
+ * rather than building them server-side for every row regardless of whether
+ * the user ever opens the card.
  *
  * Data attributes required on .manga-card:
  *   data-title   — manga title string

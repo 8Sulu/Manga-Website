@@ -53,9 +53,8 @@ def reconnect(conn, cursor):
     wait_timeout closing an idle connection mid-scrape). Returns (conn,
     cursor) — callers must use the returned pair, never the originals.
 
-    Shared by leon_scraper.py and broward_scraper.py, which used to each
-    carry an identical standalone copy — same drift risk as the
-    ON_SHELF_STATUSES bug, caught here before it had the chance to diverge.
+    Shared by leon_scraper.py and broward_scraper.py so the retry logic
+    can't drift between the two scrapers.
     """
     try:
         conn.ping(reconnect=True, attempts=3, delay=5)

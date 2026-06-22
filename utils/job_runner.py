@@ -3,32 +3,19 @@ utils/job_runner.py
 
 Redis-backed job queue, built on RQ (Redis Queue).
 
-WHY THIS EXISTS — MIGRATION FROM THE IN-PROCESS VERSION
-─────────────────────────────────────────────────────────
-The previous implementation kept a plain `_jobs: dict` in process memory,
-guarded by a `threading.Lock`. That works *only* if there is exactly one
-Gunicorn worker process, because `/api/job/<name>` has to land on the same
-process that started the job to see its progress — see the old comment in
-gunicorn.conf.py ("WHY 1 WORKER"). It's a hard ceiling on scaling: you can't
-add a second worker (or a second container replica) without job status
-silently going stale on whichever worker didn't run the job.
+Job state lives in Redis rather than a process-local dict, because
+`/api/job/<name>` has to be answerable by whichever Gunicorn worker
+receives the polling request — not necessarily the one that started the
+job. Redis is shared by every process that can reach it:
 
-This version moves all job state into Redis:
     job:state:{job_name}  → HASH  {running, progress, message, stop_requested, rq_job_id}
     job:history           → LIST  of JSON-encoded {job, status, message, at}
 
-Redis is shared by every process that can reach it, so:
-  - Any Gunicorn worker can answer `/api/job/<name>` correctly.
-  - The actual subprocess (scraper / MAL fetch) runs inside a separate
-    `rq worker manga-jobs` process — started independently (see
-    manga-worker.service / docker-compose's `worker` service) — so a long
-    scrape no longer ties up a web request thread or worker slot at all.
-  - `stop_job()` works across processes: it just flips a Redis flag that
-    the worker process polls.
-
-Public API is intentionally unchanged from the old module so callers
-(web/backend.py) didn't need to change shape — only the `on_complete`
-callback parameter was dropped (see note on `start_job` below).
+The actual subprocess (scraper / MAL fetch) runs inside a separate
+`rq worker manga-jobs` process (see manga-worker.service / docker-compose's
+`worker` service), never inside a Gunicorn worker — so a long scrape
+doesn't tie up a web request thread, and `stop_job()` works across
+processes by flipping a Redis flag that the worker process polls.
 
 Public API
 ──────────
@@ -39,10 +26,9 @@ Public API
     read_job_history()              → list[dict]   (oldest → newest)
     append_job_history(job, s, m)  → None
     execute_job(name, cmd)          — the function the RQ worker actually
-                                       runs; not normally called directly,
-                                       but it's a plain top-level function
-                                       (not a closure) so RQ/tests can
-                                       import and invoke it directly.
+                                       runs; a plain top-level function (not
+                                       a closure) so RQ/tests can import and
+                                       invoke it directly.
 """
 
 from __future__ import annotations
@@ -111,7 +97,7 @@ def _state_key(job_name: str) -> str:
 
 
 def read_job_history() -> list[dict]:
-    """Return job history, oldest first (mirrors the old in-memory contract)."""
+    """Return job history, oldest first."""
     r = _get_redis()
     raw = r.lrange(HISTORY_KEY, 0, -1)
     out: list[dict] = []
@@ -150,7 +136,7 @@ _LOG_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
 def execute_job(job_name: str, cmd: list[str]) -> None:
     """
     Entry point invoked by `rq worker manga-jobs` (see manga-worker.service /
-    docker-compose's `worker` service). NOT normally called directly from
+    docker-compose's `worker` service). Not normally called directly from
     request handlers — `start_job()` enqueues this; a separate worker process
     dequeues and runs it.
 
@@ -257,23 +243,20 @@ def start_job(job_name: str, cmd: list[str]) -> tuple[bool, int, str]:
     """
     Enqueue `cmd` to run under the name `job_name` and return immediately.
 
-    NOTE on the dropped `on_complete` parameter: the old in-process version
-    accepted an `on_complete(job_name, ok)` callback (backend.py used it to
-    invalidate an in-memory cache). That doesn't translate to a distributed
-    queue — `execute_job` above runs in a *different process* than the
-    Gunicorn worker that called `start_job`, so a Python closure captured
-    here would either fail to serialize or, if it somehow ran, would mutate
-    state in the wrong process. Call sites that need "do X after this job"
-    should poll `get_job()` / rely on a short cache TTL instead (see
-    `_missing_manga_ids` in backend.py).
+    Deliberately no `on_complete` callback parameter: execute_job() runs in
+    a *different process* than the Gunicorn worker that calls start_job(),
+    so a closure captured here would either fail to serialize or, if it
+    somehow ran, would mutate state in the wrong process. Callers that need
+    "do X after this job" should poll get_job() or rely on a short cache
+    TTL instead (see _missing_manga_ids in backend.py).
     """
     r = _get_redis()
     state_key = _state_key(job_name)
 
-    # Optimistic-lock loop: only one concurrent start_job() call for the same
-    # job_name should win the "claim". This is the distributed equivalent of
-    # the old `_jobs_lock` — necessary now that multiple Gunicorn workers can
-    # call start_job() for the same job_name at (almost) the same time.
+    # Optimistic-lock loop: only one concurrent start_job() call for the
+    # same job_name should win the claim. Needed because multiple Gunicorn
+    # workers can call start_job() for the same job_name at nearly the same
+    # time — a plain in-process lock wouldn't be visible across processes.
     with r.pipeline() as pipe:
         while True:
             try:

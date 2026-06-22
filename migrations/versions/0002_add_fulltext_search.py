@@ -1,4 +1,4 @@
-"""Add FULLTEXT index on manga.Title for full-text search (item #8)
+"""Add FULLTEXT index on manga.Title for full-text search
 
 Revision ID: 0002
 Revises: 0001

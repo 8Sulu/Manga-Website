@@ -15,12 +15,6 @@
 #   downloads every third-party dependency) independently of application
 #   source changes. Editing a .py file won't bust the dependency-install
 #   cache and trigger a full reinstall on every build.
-#
-# NOTE — gunicorn isn't in pyproject.toml's [project.dependencies]
-#   (only flask, flask-session, mysql-connector-python, requests, bs4,
-#   lxml are listed there). It's installed explicitly below as a stopgap;
-#   the real fix is adding "gunicorn>=22.0" to pyproject.toml so it's
-#   tracked like every other runtime dependency.
 
 FROM python:3.13-slim AS base
 # ↑ bump to python:3.14-slim if you want to match your dev machine exactly —
