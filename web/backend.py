@@ -367,6 +367,7 @@ def api_stats():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
 @app.route("/api/suggestions")
 def api_suggestions():
     q = request.args.get("q", "").strip()

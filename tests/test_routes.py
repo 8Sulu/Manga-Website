@@ -72,7 +72,7 @@ class TestPublicRoutes:
         ):
             resp = client.get("/api/stats")
         data = resp.get_json()
-        assert "Scraped" in data["last_scraped"]
+        assert data["last_scraped"] == "2024-06-01T12:00:00+00:00"
 
     def test_api_suggestions_too_short_returns_empty(self, client):
         resp = client.get("/api/suggestions?q=a")
