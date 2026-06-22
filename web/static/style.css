@@ -221,24 +221,7 @@ button.danger:hover { background: var(--red-bg); }
 .vol-chip.vol-status-hold  { border-left-color: var(--amber); background: color-mix(in srgb, var(--amber-bg) 55%, var(--bg4)); }
 .vol-chip.vol-status-out   { border-left-color: var(--red);   background: color-mix(in srgb, var(--red-bg)   55%, var(--bg4)); }
 
-a.vol-chip:hover                  { border-color: var(--purple-brd); background: var(--purple-bg); border-left-color: var(--purple); }
-a.vol-chip.vol-status-avail:hover { border-color: var(--green-brd);  background: var(--green-bg);  border-left-color: var(--green); }
-a.vol-chip.vol-status-hold:hover  { border-color: var(--amber-brd);  background: var(--amber-bg);  border-left-color: var(--amber); }
-a.vol-chip.vol-status-out:hover   { border-color: var(--red-brd);    background: var(--red-bg);    border-left-color: var(--red); }
-
-a.vol-chip:hover .vol-chip-num                  { color: var(--purple); }
-a.vol-chip.vol-status-avail:hover .vol-chip-num { color: var(--green); }
-a.vol-chip.vol-status-hold:hover  .vol-chip-num { color: var(--amber); }
-a.vol-chip.vol-status-out:hover   .vol-chip-num { color: var(--red); }
-
 .vol-chip-num { color: var(--text3); margin-bottom: 3px; font-size: .57rem; transition: color .12s; }
-.vol-chip-branches { display: flex; flex-direction: column; gap: 2px; }
-.vol-branch-row    { display: flex; align-items: center; gap: 4px; }
-.vol-branch-dot    { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; background: var(--text3); }
-.vol-branch-dot.avail { background: var(--green); }
-.vol-branch-dot.hold  { background: var(--amber); }
-.vol-branch-dot.out   { background: var(--red); }
-.vol-branch-name   { color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 
 /* ── Expanded footer ──────────────────────────────────────────── */
 .exp-header { display: flex; flex-direction: column; gap: .3rem; }
@@ -269,7 +252,6 @@ a.vol-chip.vol-status-out:hover   .vol-chip-num { color: var(--red); }
 .deco-jp { font-family: var(--body); font-size: .72rem; color: var(--text3); letter-spacing: .1em; opacity: .45; }
 .no-data-msg { font-family: var(--mono); font-size: .68rem; color: var(--text3); padding: .5rem 0; }
 .manga-card.mal-hidden { display: none !important; }
-.pill-btn.pill-vol1.active { background: var(--green-bg); border-color: var(--green-brd); color: var(--green); }
 
 /* ── Pagination ──────────────────────────────────────────────── */
 .pagination-row { display: flex; align-items: center; justify-content: center; gap: 4px; margin-top: 2rem; flex-wrap: wrap; }
@@ -294,13 +276,8 @@ a.vol-chip.vol-status-out:hover   .vol-chip-num { color: var(--red); }
 .mal-title { font-family: var(--mono); font-size: .63rem; letter-spacing: .12em; text-transform: uppercase; color: var(--text2); flex: 1; }
 .mal-hint-inline { font-family: var(--mono); font-size: .62rem; color: var(--text3); }
 .mal-chevron { font-family: var(--mono); font-size: .6rem; color: var(--text3); transition: transform .2s; display: inline-block; flex-shrink: 0; }
-.mal-panel.open .mal-chevron { transform: rotate(90deg); }
-.mal-active-badge { font-family: var(--mono); font-size: .58rem; padding: 2px 7px; border-radius: 99px; background: var(--amber-bg); border: 1px solid var(--amber-brd); color: var(--amber); }
 .mal-body { display: none; padding: 0 1.1rem .9rem; border-top: 1px solid var(--border); }
-.mal-panel.open .mal-body { display: block; }
 .mal-header { display: flex; align-items: center; gap: .65rem; padding-top: .8rem; margin-bottom: .75rem; flex-wrap: wrap; }
-.mal-loading { font-family: var(--mono); font-size: .68rem; color: var(--text3); }
-.mal-error   { font-family: var(--mono); font-size: .68rem; color: var(--amber); }
 .mal-load-btn  { font-size: .65rem; padding: 5px 13px; }
 .mal-apply-btn { font-size: .65rem; padding: 5px 13px; }
 .mal-apply-btn.visible { display: inline-flex !important; }

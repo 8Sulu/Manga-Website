@@ -223,9 +223,9 @@ def parse_title_info(
             statuses = [
                 item_status(item.get("currentLocationID"), item.get("dueDate"))
                 for item in call.get("ItemInfo", [])
-            ] or ["Graphic Novel - Young Adult Fiction"]
+            ] or ["Checked Out"]
 
-            final_status = next((s for s in statuses if "Checked Out" not in s), "Checked Out")
+            final_status = next((s for s in statuses if s != "Checked Out"), "Checked Out")
 
             books.append(
                 {

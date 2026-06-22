@@ -1,10 +1,9 @@
-.page-header {
-  padding: 1.25rem 0 1rem; border-bottom: 1px solid var(--border); margin-bottom: 1.5rem;
-  display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
-}
-.back-link { font-family: var(--mono); font-size: .7rem; color: var(--text3); display: flex; align-items: center; gap: 5px; }
+/* page-header/back-link/sep base styles live in style.css (shared with
+   admin.html). This page only overrides the link's hover color to match
+   the purple "active" accent used in the vol-chips/MAL panel/pagination
+   below — that's the only intentional difference; collapsing the rest
+   removed a stray .05 opacity drift on .sep that wasn't doing anything. */
 .back-link:hover { color: var(--purple); }
-.sep { font-family: var(--mono); font-size: .6rem; color: var(--text3); opacity: .4; }
 
 /* ── Volume chips ────────────────────────────────────────── */
 .vol-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px,1fr)); gap: 5px; }

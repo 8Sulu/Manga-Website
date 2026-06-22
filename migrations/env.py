@@ -55,8 +55,7 @@ def _build_db_url() -> str:
     ).render_as_string(hide_password=False)
 
 
-config.set_main_option("sqlalchemy.url", _build_db_url())
-
+config.set_main_option("sqlalchemy.url", _build_db_url().replace("%", "%%"))
 
 def run_migrations_offline() -> None:
     url = config.get_main_option("sqlalchemy.url")

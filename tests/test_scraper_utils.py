@@ -257,9 +257,8 @@ class TestBranchShort:
             # "northeast" → "north" fires before "east"
             ("Bruce J. Host Northeast Branch Library", "North"),
             ("South Regional/Broward College Library", "South"),
-            # "west" fires before "weston" in the map
             ("West Regional Library", "West"),
-            ("Weston Branch", "West"),  # 'west' hits first
+            ("Weston Branch", "Weston"), 
             ("Hollywood Branch", "Hollywood"),
             # "central" fires before "lauderhill" in the map
             ("Lauderhill Central Park Library", "Central"),

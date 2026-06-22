@@ -33,6 +33,7 @@ from utils.scraper_utils import (
     extract_volume,
     is_novel,
     load_title_author_map,
+    normalize_status,
 )
 
 log = get_logger(__name__)
@@ -51,15 +52,6 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
     "X-Requested-With": "XMLHttpRequest",
     "Origin": BASE_URL,
-}
-
-ON_SHELF_STATUSES = {
-    "general collection",
-    "new materials",
-    "reference",
-    "graphic novels",
-    "young adult",
-    "children",
 }
 
 DB_BATCH_SIZE = 20
@@ -396,14 +388,13 @@ def fetch_item_availability(
                     {
                         "library": (rec.get("LIBRARY") or "").strip(),
                         "status": (rec.get("SD_ITEM_STATUS") or "").strip(),
-                        "on_shelf": (rec.get("SD_ITEM_STATUS") or "").strip().lower()
-                        in ON_SHELF_STATUSES,
                     }
                     for rec in data.get("childRecords", [])
                 ]
                 log.debug(f"item {item_id}: {len(copies)} copies")
                 for c in copies:
-                    log.debug(f"  [{'✓' if c['on_shelf'] else '✗'}] {c['library']} — {c['status']}")
+                    norm = normalize_status(c["status"])
+                    log.debug(f"  [{'✓' if norm == 'Available' else '✗'}] {c['library']} — {c['status']}")
                 return copies
 
             if r.status_code in (429, 503):
@@ -450,19 +441,10 @@ def build_volume_branch_map(
             raw_name = copy["library"]
             db_name = BROWARD_BRANCH_MAPPING.get(raw_name, raw_name)
             branch_id = branch_map.get(db_name)
-
             if branch_id is None:
                 unmatched.add(raw_name)
                 continue
-
-            status = (
-                "Available"
-                if copy["on_shelf"]
-                else "On Hold"
-                if "hold" in copy["status"].lower()
-                else "Checked Out"
-            )
-
+            status = normalize_status(copy["status"])
             current = result[volume].get(branch_id)
             if current is None or STATUS_PRIORITY[status] > STATUS_PRIORITY[current]:
                 result[volume][branch_id] = status
