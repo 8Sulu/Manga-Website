@@ -1,36 +1,19 @@
 """
 utils/admin_utils.py
 
-Constants and helpers used exclusively by the admin routes in backend.py:
-  - SCHEMA               — DDL string for a full DB reset
-  - INSERT_OPS           — (csv_filename, INSERT query) pairs for re-seeding
-  - insert_csv()         — seed one CSV file into the DB
-  - parse_range_str()    — parse "1-50" / "20" range strings
-  - stamp_alembic_head() — keep Alembic's bookkeeping in sync after a reset
+Helpers used by the admin routes in backend.py: schema reset, CSV
+re-seeding, range-string parsing, and Alembic bookkeeping.
 
-SCHEMA / ALEMBIC SYNC — READ BEFORE EDITING SCHEMA:
-  Schema *changes* should go through a new file in migrations/versions/
-  (see migrations/env.py and the "Database Migrations" section of
-  README.md) — NOT a hand-edit here. SCHEMA below is kept ONLY for the
-  admin "Reset Database" button, which still does a full drop/reseed for
-  fast dev resets and disaster recovery. It's hand-synced to match
-  whatever the head Alembic migration produces (currently: the original
-  five tables, plus the FULLTEXT index added in
-  migrations/versions/0002_add_fulltext_search.py) so that the schema you
-  get from clicking "Reset Database" and the schema you'd get from
-  `alembic upgrade head` against an empty DB are identical. If you add a
-  migration that changes the schema, update SCHEMA to match in the same
-  commit, or the two paths will silently drift.
+SCHEMA below is for the "Reset Database" button's full drop/reseed path
+only. Real schema changes belong in migrations/versions/; if you add a
+migration, update SCHEMA to match in the same commit or the two paths
+will drift.
 """
 
 import csv
 
 from config.settings import BASE_DIR, DATA_DIR
 from utils.database_utils import get_db_connection
-
-
-# ── DB schema ────────────────────────────────────────────────────────────────
-# Kept in sync with migrations/versions/ — see the module docstring above.
 
 SCHEMA = """
 SET FOREIGN_KEY_CHECKS=0;
@@ -80,10 +63,8 @@ INSERT_OPS = [
 ]
 
 
-# ── CSV seeder ─────────────────────────────────────────────────────────────────
-
-
 def insert_csv(filename: str, query: str) -> str:
+    """Seed one CSV file into the DB, returning a ✓/✗ summary line."""
     filepath = DATA_DIR / filename
     try:
         with open(filepath, encoding="utf-8") as f:
@@ -100,28 +81,15 @@ def insert_csv(filename: str, query: str) -> str:
         return f"✗ {filename}: {e}"
 
 
-# ── Alembic bookkeeping ─────────────────────────────────────────────────────
-
-
 def stamp_alembic_head() -> str:
     """
     Mark Alembic's version table as being at the latest migration.
 
-    "Reset Database" drops and recreates every table from SCHEMA above —
-    completely bypassing migrations/versions/. SCHEMA is hand-synced with
-    the head migration (see the module docstring) specifically so the live
-    schema and "head" are identical the instant after a reset finishes.
-    The one thing a CREATE-TABLE-from-SCHEMA reset can't do on its own is
-    update Alembic's own bookkeeping table (`alembic_version`) — that
-    table isn't in SCHEMA's DROP list, so it survives a reset untouched.
-
-    Without this call: a reset performed before `alembic upgrade head` has
-    ever run leaves no alembic_version row at all, and the next `alembic
-    upgrade head` doesn't know it's already at head — it tries to re-run
-    "CREATE TABLE manga" against a table that already exists and fails.
-    `alembic stamp head` isn't a real migration run (no SQL from any
-    upgrade() executes) — it's a bookkeeping write that keeps that table
-    truthful.
+    "Reset Database" recreates tables directly from SCHEMA, bypassing
+    migrations/ entirely — so it never touches alembic_version. Without
+    this call, the next `alembic upgrade head` doesn't know the DB is
+    already current and tries to re-run CREATE TABLE against tables that
+    already exist.
     """
     try:
         from alembic import command
@@ -135,9 +103,6 @@ def stamp_alembic_head() -> str:
         return f"✗ alembic stamp failed: {e}"
 
 
-# ── Range parser ───────────────────────────────────────────────────────────────
-
-
 def parse_range_str(s: str, max_titles: int = 9999) -> tuple[int, int]:
     """
     Parse a range string into (lo, hi).
@@ -145,6 +110,9 @@ def parse_range_str(s: str, max_titles: int = 9999) -> tuple[int, int]:
       "1-50"   → (1, 50)
       "10-"    → (10, max_titles)
       ""       → (1, 1)
+
+    Em-dash/en-dash are normalised to '-' since copy-pasted ranges from
+    the UI sometimes carry them in.
     """
     import re
 

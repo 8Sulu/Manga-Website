@@ -1,44 +1,21 @@
 """
 utils/job_logging.py
 
-Structured logging for scripts that run as job_runner subprocesses
-(leon_scraper.py, broward_scraper.py — see scripts/).
+Structured logging for scraper subprocesses run via job_runner.
 
-WHY TWO LOGGERS PER SCRIPT, NOT ONE
-────────────────────────────────────
-job_runner deliberately treats any line starting with a
-"YYYY-MM-DD HH:MM:SS" timestamp as log noise — NOT a candidate for the job
-history message (see utils/job_runner.py's _LOG_PREFIX_RE) — so verbose
-diagnostic logging doesn't clobber the one-line human-readable summary an
-admin sees in the job history table. That means the two kinds of output
-need two different formats:
+Provides two loggers per script:
+  get_logger(name)          -> timestamped, level-tagged diagnostic output.
+                                job_runner's history capture skips any line
+                                starting with a timestamp, so this is for
+                                developer-facing detail only.
+  get_progress_logger(name) -> bare message, no prefix. Lines like
+                                "[12/50] Berserk" are picked up by job_runner
+                                as live progress and the job-history summary.
 
-  get_logger(name)            -> verbose, timestamped, level-tagged.
-                                  Excluded from job history by design.
-                                  Use for diagnostics: retries, per-branch
-                                  detail, warnings — anything a developer
-                                  debugging a failed scrape would want but
-                                  an admin glancing at the dashboard
-                                  wouldn't.
-
-  get_progress_logger(name)   -> bare message, no timestamp/level prefix.
-                                  Direct replacement for the old
-                                  print(..., flush=True) calls:
-                                  "[12/50] Berserk", DB commit summaries,
-                                  final completion lines. These ARE meant
-                                  to be picked up as the job history
-                                  message and shown as live progress text.
-
-Both write to sys.stdout. WHY THIS STILL SATISFIES THE OLD
-"flush=True is critical" LEARNING:
-logging.StreamHandler.emit() calls self.flush() after every record —
-unlike a bare print() to a non-TTY stream, which Python block-buffers by
-default unless explicitly flushed. That buffering was the actual cause of
-the watchdog-false-positive risk this codebase documented: an unflushed
-print() can sit in a buffer indefinitely on a piped stdout, making an
-actively-running job *look* hung to job_runner's STDOUT_TIMEOUT watchdog.
-Switching to logging.StreamHandler removes the need to thread flush=True
-through every call site by hand.
+Both use logging.StreamHandler instead of print(), which auto-flushes after
+every record. An unflushed print() on a piped stdout can sit in a buffer
+indefinitely, making an actively-running job look hung to job_runner's
+STDOUT_TIMEOUT watchdog.
 """
 
 from __future__ import annotations
@@ -71,12 +48,7 @@ def get_logger(name: str) -> logging.Logger:
 
 
 def get_progress_logger(name: str) -> logging.Logger:
-    """
-    Operator-facing progress logger — replaces the old print(flush=True)
-    calls. No timestamp prefix, so these lines still flow through
-    job_runner's progress-bracket regex and job-history capture exactly as
-    they did when they were raw print() output.
-    """
+    """Operator-facing progress logger — feeds job_runner's progress parser."""
     logger = logging.getLogger(f"{name}.progress")
     if not logger.handlers:
         handler = logging.StreamHandler(sys.stdout)
