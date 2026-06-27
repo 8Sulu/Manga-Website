@@ -25,7 +25,6 @@ when this script asks for it.
 
 from __future__ import annotations
 
-import json
 import os
 import secrets
 import string
