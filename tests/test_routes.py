@@ -367,17 +367,24 @@ class TestDeleteTitle:
 
 class TestMalEndpoints:
     def test_mal_mangalist_without_token_returns_503(self, client):
-        import os
-
-        with patch.dict(os.environ, {"MAL_ACCESS_TOKEN": ""}):
+        # Patches services.mal_client.current_access_token directly rather
+        # than os.environ["MAL_ACCESS_TOKEN"]: api_mal_mangalist() reads the
+        # live token through current_access_token(), which checks
+        # data/mal_tokens.json *before* falling back to the env var (see
+        # mal_client.py's module docstring — refreshed tokens persist there,
+        # not back to .env). Patching only the env var leaves that file's
+        # contents in play, so on any machine that has ever run a real MAL
+        # refresh/auth (mal_authorize.py), this test would silently see a
+        # real token and the endpoint would return 200, not 503. Patching
+        # the function itself is the only way to deterministically force
+        # the "no token configured" branch regardless of local disk state.
+        with patch("services.mal_client.current_access_token", return_value=""):
             resp = client.get("/api/mal/mangalist")
         assert resp.status_code == 503
 
     def test_mal_mangalist_with_token_starts_job(self, client):
-        import os
-
         with (
-            patch.dict(os.environ, {"MAL_ACCESS_TOKEN": "fake_token"}),
+            patch("services.mal_client.current_access_token", return_value="fake_token"),
             patch("threading.Thread") as mock_thread,
         ):
             mock_thread.return_value = MagicMock()
