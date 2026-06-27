@@ -12,23 +12,18 @@ A full-stack web application that aggregates manga and light novel availability 
 
 ## Screenshots
 
-<!-- SCREENSHOT: Home page. Hero section with the search bar, the three stat tiles (volumes / titles / libraries), and the filter pill row underneath. Capture with the search box empty, before any results. -->
 ![Home page with search bar and live library stats](docs/screenshots/home.png)<br>
 *Instant search, live stats, and library/availability filters.*
 
-<!-- SCREENSHOT: Search results grid. Search for something with several hits (e.g. "one") so the grid is full. Capture with a mix of available/checked-out badges visible across cards. -->
 ![Search results grid showing availability badges](docs/screenshots/search-results.png)
 *Results grid — type, volume count, score, and live per-library availability at a glance.*
 
-<!-- SCREENSHOT: A single expanded manga card. Click a card with both LCPL and Broward data so the library tabs are visible, then capture the volume grid showing per-branch dot status. This is the core feature — make it count. -->
 ![Expanded manga card showing per-volume, per-branch availability](docs/screenshots/card-expanded.png)
 *Expanded view — per-volume, per-branch availability across both library systems.*
 
-<!-- SCREENSHOT: Admin dashboard (/admin). Capture with the stats row populated and, ideally, a scrape job mid-run so the progress bar and live status text are visible. -->
 ![Admin dashboard with job controls and live progress](docs/screenshots/admin-dashboard.png)
 *Admin dashboard — scrape controls, live job progress, and collection stats.*
 
-<!-- SCREENSHOT: Swagger UI at /api/docs. Capture with a couple of endpoint groups expanded (e.g. Search and Jobs). -->
 ![Swagger UI for the REST API](docs/screenshots/api-docs.png)
 *Auto-generated API docs via Swagger UI, served from a hand-written OpenAPI 3.0 spec.*
 

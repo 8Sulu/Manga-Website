@@ -43,7 +43,6 @@ COPY . .
 COPY docker/entrypoint.sh /entrypoint.sh
 
 RUN chmod +x /entrypoint.sh \
-    && mkdir -p /app/data/flask_sessions \
     && chown -R manga:manga /app
 
 USER manga

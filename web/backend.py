@@ -657,7 +657,14 @@ def api_mal_mangalist():
     if rate_limited(f"mal:{ip}", limit=10, window=60):
         return jsonify({"ok": False, "message": "Rate limited"}), 429
 
-    access_token = os.getenv("MAL_ACCESS_TOKEN", "")
+    # Read through services.mal_client rather than os.getenv() directly —
+    # the live, post-refresh token may only exist in data/mal_tokens.json
+    # (written by a different Gunicorn worker, or by the rq worker
+    # container running get_manga.py) and never reach this process's own
+    # os.environ. See mal_client.py's module docstring.
+    from services.mal_client import current_access_token
+
+    access_token = current_access_token()
     if not access_token:
         return jsonify({"ok": False, "message": "MAL access token not configured"}), 503
 

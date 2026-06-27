@@ -27,23 +27,6 @@ DB_CONFIG = {
     "database": os.getenv("DB_NAME", "manga"),
 }
 
-# ── Library registry ──────────────────────────────────────────────────────────
-# LibraryID values must match what is seeded into the `library` table (libraries.csv)
-LIBRARY_MAPPING = {
-    1: {
-        "name": "Leon County Public Library",
-        "short": "LCPL",
-        "base_url": "https://lcpl.ent.sirsi.net/client/en_US/lcpl",
-    },
-    2: {
-        "name": "Broward County Library",
-        "short": "BCL",
-        "base_url": "https://broward.ent.sirsi.net/client/en_US/default",
-    },
-}
-
-LIBRARY_BASE_URL = LIBRARY_MAPPING[1]["base_url"]  # backward compat
-
 # ── LCPL branch mapping ───────────────────────────────────────────────────────
 # BranchID values must match what is seeded in branches.csv
 BRANCH_MAPPING = {

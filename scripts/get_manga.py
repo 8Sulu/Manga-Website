@@ -18,9 +18,10 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from services.api_service import process_manga_batch, is_stop_requested
-import logging
+from utils.job_logging import get_logger, get_progress_logger
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+log = get_logger(__name__)
+plog = get_progress_logger(__name__)
 
 
 def parse_args(raw: str) -> list[int]:
@@ -50,26 +51,33 @@ def parse_args(raw: str) -> list[int]:
 
 def main():
     if len(sys.argv) != 2:
-        print(__doc__)
+        plog.info(__doc__)
         sys.exit(1)
 
     try:
         offsets = parse_args(sys.argv[1])
     except ValueError as e:
-        print(f"Error: {e}")
+        log.error(f"Bad argument {sys.argv[1]!r}: {e}")
+        plog.info(f"Error: {e}")
         sys.exit(1)
 
     total = len(offsets)
     for n, offset in enumerate(offsets, start=1):
         if is_stop_requested():
-            print(f"[{n}/{total}] Stop requested — halting", flush=True)
+            log.info(f"Stop requested before run {n}/{total}")
+            plog.info(f"[{n}/{total}] Stop requested — halting")
             break
-        print(f"\n[Run {n}/{total}] offset={offset}", flush=True)
+
+        log.info(f"Run {n}/{total} starting at offset {offset}")
+        plog.info(f"[Run {n}/{total}] offset={offset}")
+
         if not process_manga_batch(offset):
-            print(f"[Run {n}/{total}] Failed at offset {offset}")
+            log.error(f"Run {n}/{total} failed at offset {offset}")
+            plog.info(f"[Run {n}/{total}] Failed at offset {offset}")
             sys.exit(1)
 
-    print("\nAll runs complete.", flush=True)
+    log.info("All runs complete")
+    plog.info("All runs complete.")
 
 
 if __name__ == "__main__":

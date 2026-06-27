@@ -1,5 +1,4 @@
 import csv
-import logging
 import os
 import time
 from pathlib import Path
@@ -24,8 +23,10 @@ except ImportError:
 
 from config.settings import DATA_DIR, REQUEST_TIMEOUT, MAX_RETRIES  # noqa: E402
 from services.mal_client import authenticated_request  # noqa: E402
+from utils.job_logging import get_logger, get_progress_logger  # noqa: E402
 
-logger = logging.getLogger(__name__)
+log = get_logger(__name__)
+plog = get_progress_logger(__name__)
 
 # ── Stop flag ─────────────────────────────────────────────────────────────────
 _stop_requested = False
@@ -118,21 +119,18 @@ def _fetch_manga_details(mal_id: str) -> dict:
 
             elif resp.status_code in (429, 503):
                 wait = min(60, 5 * (2**attempt))
-                logger.warning(f"  HTTP {resp.status_code} for ID {mal_id} — retrying in {wait}s")
+                log.warning(f"  HTTP {resp.status_code} for ID {mal_id} — retrying in {wait}s")
                 time.sleep(wait)
             else:
-                logger.error(f"  HTTP {resp.status_code} for ID {mal_id}: {resp.text[:200]}")
+                log.error(f"  HTTP {resp.status_code} for ID {mal_id}: {resp.text[:200]}")
                 break
 
         except requests.exceptions.RequestException as e:
             wait = min(60, 5 * (2**attempt))
-            logger.warning(
+            log.warning(
                 f"  Network error ({type(e).__name__}) for ID {mal_id} — retrying in {wait}s"
             )
-            print(
-                f"  [!] Network timeout/error fetching details for ID {mal_id}, retrying...",
-                flush=True,
-            )
+            plog.info(f"  [!] Network timeout/error fetching details for ID {mal_id}, retrying...")
             time.sleep(wait)
 
     return {
@@ -194,7 +192,7 @@ def _upsert_manga_to_db(rows: list[dict]) -> str:
         conn.close()
         return f"DB: inserted {inserted} new manga rows, skipped {skipped} duplicates"
     except Exception as e:
-        logger.warning(f"DB upsert failed (CSV still updated): {e}")
+        log.warning(f"DB upsert failed (CSV still updated): {e}")
         return f"DB upsert failed: {e}"
 
 
@@ -208,19 +206,19 @@ def process_manga_batch(offset: int) -> bool:
     ranking_url = (
         f"https://api.myanimelist.net/v2/manga/ranking?ranking_type=all&limit=500&offset={offset}"
     )
-    logger.info(f"Fetching rankings at offset {offset}…")
-    print(f"Fetching rankings at offset {offset}…", flush=True)
+    log.info(f"Fetching rankings at offset {offset}…")
+    plog.info(f"Fetching rankings at offset {offset}…")
 
     resp = authenticated_request(ranking_url, timeout=REQUEST_TIMEOUT)
     if resp.status_code != 200:
-        logger.error(f"Failed to fetch rankings: HTTP {resp.status_code}")
-        print(f"[-] Rankings request failed: HTTP {resp.status_code}", flush=True)
+        log.error(f"Failed to fetch rankings: HTTP {resp.status_code}")
+        plog.info(f"[-] Rankings request failed: HTTP {resp.status_code}")
         return False
 
     items = resp.json().get("data", [])
     if not items:
-        logger.info("No items returned — offset may be beyond total ranked manga")
-        print("[*] No items in response — batch is empty", flush=True)
+        log.info("No items returned — offset may be beyond total ranked manga")
+        plog.info("[*] No items in response — batch is empty")
         return True
 
     # ── Load existing IDs from CSV (source of truth for dedup) ────────────────
@@ -241,8 +239,8 @@ def process_manga_batch(offset: int) -> bool:
 
     for i, item in enumerate(items):
         if is_stop_requested():
-            logger.info("Stop requested during get_manga")
-            print(f"[{i}/{total}] Stop requested", flush=True)
+            log.info("Stop requested during get_manga")
+            plog.info(f"[{i}/{total}] Stop requested")
             break
 
         node = item.get("node", {})
@@ -250,10 +248,10 @@ def process_manga_batch(offset: int) -> bool:
         canonical_title = node.get("title", "")
 
         if not mal_id or mal_id in existing_ids:
-            print(f"[{i + 1}/{total}] skip {canonical_title}", flush=True)
+            plog.info(f"[{i + 1}/{total}] skip {canonical_title}")
             continue
 
-        print(f"[{i + 1}/{total}] Fetching details for {mal_id}: {canonical_title}", flush=True)
+        plog.info(f"[{i + 1}/{total}] Fetching details for {mal_id}: {canonical_title}")
 
         details = _fetch_manga_details(mal_id)
         chosen_title = details.pop("EnglishTitle") or canonical_title
@@ -268,13 +266,13 @@ def process_manga_batch(offset: int) -> bool:
         with open(manga_csv, "a", encoding="utf-8", newline="") as f:
             w = csv.DictWriter(f, fieldnames=MANGA_CSV_FIELDS)
             w.writerows(new_rows)
-        logger.info(f"Appended {len(new_rows)} entries to manga.csv")
+        log.info(f"Appended {len(new_rows)} entries to manga.csv")
 
         db_msg = _upsert_manga_to_db(new_rows)
-        print(f"[+] {db_msg}", flush=True)
-        print(f"[+] Added {len(new_rows)} new manga (offset {offset})", flush=True)
+        plog.info(f"[+] {db_msg}")
+        plog.info(f"[+] Added {len(new_rows)} new manga (offset {offset})")
     else:
-        print(f"[*] No new manga found at offset {offset} (all already in manga.csv)", flush=True)
+        plog.info(f"[*] No new manga found at offset {offset} (all already in manga.csv)")
 
     return True
 
@@ -284,14 +282,12 @@ def process_manga_batch(offset: int) -> bool:
 if __name__ == "__main__":
     import sys
 
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-
     if len(sys.argv) != 2:
-        print("Usage: python api_service.py <offset>")
+        plog.info("Usage: python api_service.py <offset>")
         sys.exit(1)
 
     if process_manga_batch(int(sys.argv[1])):
-        print("Done")
+        plog.info("Done")
     else:
-        print("Failed")
+        plog.info("Failed")
         sys.exit(1)
